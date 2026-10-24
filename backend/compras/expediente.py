@@ -1,9 +1,43 @@
+#def documentos_faltantes(solicitud):
+   # campos = {"informe": "Informe técnico", "proforma": "Cotización", "poa": "POA"}
+#   if solicitud.origen_modulo in ("SOPORTE", "MANTENIMIENTO"):
+#        campos["pedido"] = "Proveído de jefatura"
+  #  return [nombre for campo, nombre in campos.items() if not getattr(solicitud, campo)]
+
+from decimal import Decimal
+
+
 def documentos_faltantes(solicitud):
-    campos = {"informe": "Informe técnico", "proforma": "Cotización", "poa": "POA"}
+    from .models import CotizacionCompra
+
+    campos = {
+        "informe": "Informe técnico",
+        "proforma": "Cotización",
+        "poa": "POA",
+    }
+
     if solicitud.origen_modulo in ("SOPORTE", "MANTENIMIENTO"):
         campos["pedido"] = "Proveído de jefatura"
-    return [nombre for campo, nombre in campos.items() if not getattr(solicitud, campo)]
 
+    faltantes = [
+        nombre
+        for campo, nombre in campos.items()
+        if not getattr(solicitud, campo)
+    ]
+
+    # R02: Compras mayores a Bs 500 requieren tres cotizaciones
+    if solicitud.monto_estimado is not None:
+        if solicitud.monto_estimado > Decimal("500.00"):
+            cantidad = CotizacionCompra.objects.filter(
+                solicitud=solicitud
+            ).count()
+
+            if cantidad < 3:
+                faltantes.append(
+                    f"Se requieren 3 cotizaciones (registradas: {cantidad})"
+                )
+
+    return faltantes
 
 def completar_expediente_origen(request, origen, campo_origen):
     from rest_framework.response import Response
