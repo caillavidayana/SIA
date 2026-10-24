@@ -315,14 +315,33 @@ class SolicitudCompra(models.Model):
         auto_now=True
     )
 
-    def save(self, *args, **kwargs):
+    #def save(self, *args, **kwargs):
 
         # Regla EMI utilizada para Caja Chica.
+ #       if self.monto_estimado is not None:
+#
+ #           if self.monto_estimado <= 1500:
+#                self.via_adquisicion = "CAJA_CHICA"
+
+  #          else:
+         #       self.via_adquisicion = "FINANZAS"
+
+       # super().save(*args, **kwargs)
+    def save(self, *args, **kwargs):
+        from auditoria.models import PreferenciaSistema
+        from decimal import Decimal
+
         if self.monto_estimado is not None:
+            preferencias = PreferenciaSistema.objects.first()
 
-            if self.monto_estimado <= 1500:
+            limite = (
+                preferencias.limite_caja_chica
+                if preferencias is not None
+                else Decimal("1000.00")
+            )
+
+            if self.monto_estimado <= limite:
                 self.via_adquisicion = "CAJA_CHICA"
-
             else:
                 self.via_adquisicion = "FINANZAS"
 
