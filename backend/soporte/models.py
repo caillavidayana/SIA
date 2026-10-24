@@ -582,7 +582,16 @@ class Ticket(models.Model):
             ]
         )
 
+        # Prioridad arribapara tickets de Red
+    def save(self, *args, **kwargs):
+        if self.categoria_id:
+            if self.categoria.codigo == "RED":
+                self.prioridad = "ALTA"
 
+                if kwargs.get("update_fields") is not None:
+                    kwargs["update_fields"] = set(kwargs["update_fields"]) | {"prioridad"}
+
+        super().save(*args, **kwargs)
     # ======================================================
     # REPRESENTACIÓN
     # ======================================================
