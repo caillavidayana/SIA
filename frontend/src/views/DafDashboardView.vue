@@ -47,6 +47,7 @@
       
         <UsuarioHeader @actualizar="cargarCompras" />
       </header>
+      <CajaChicaPanel resumen />
 
       <!-- =================================================
            RESUMEN
@@ -360,8 +361,10 @@
               </div>
 
               <div>
+                <!-- REQUERIMIENTO 8: continuidad de expedientes certificados anteriores. -->
+                <button v-if="compraSeleccionada?.estado==='VERIFICADO_PENDIENTE_AUTORIZACION' && compraSeleccionada?.responsable_actual==='DAF'" class="sia-primary" :disabled="procesando" @click="ejecutarAccion('certificar-daf', {}, 'aprobar', false, 'Expediente derivado a Tesorería sin Director.')">Derivar a Tesorería</button>
                 <b>Vía de adquisición</b>
-                <span>{{ compraSeleccionada?.via_nombre || 'No indicada' }}</span>
+                <select v-if="compraSeleccionada?.estado==='CREADO_PENDIENTE_DAF'" v-model="viaEvaluacion" aria-label="Vía de adquisición"><option value="CAJA_CHICA">Caja chica</option><option value="FINANZAS">Finanzas</option></select><span v-else>{{ compraSeleccionada?.via_nombre || 'No indicada' }}</span>
               </div>
 
               <div>
@@ -383,6 +386,7 @@
               </span>
             </div>
 
+            <CotizacionesExpediente :filas="compraSeleccionada?.cotizaciones" />
             <div class="documento-lista">
 
               <template
@@ -525,11 +529,10 @@
                 <span>*</span>
               </label>
 
-              <input
+              <ArchivoInput
                 type="file"
                 accept="application/pdf"
-                @change="onSeleccionarCertificacion"
-              />
+                @change="onSeleccionarCertificacion" />
 
               <span
                 v-if="archivoCertificacion"
@@ -668,6 +671,9 @@
 
 
 <script setup>
+import CajaChicaPanel from '../components/CajaChicaPanel.vue'
+import { mostrarErrorRegla } from '../utils/errorRegla'
+import CotizacionesExpediente from '../components/CotizacionesExpediente.vue'
 import ModalSia from '../components/ModalSia.vue'
 
 import CotizacionesCompra from '../components/CotizacionesCompra.vue'
@@ -859,6 +865,7 @@ const mostrarDetalle =
 const haLeidoTodo =
   ref(false)
 
+const viaEvaluacion = ref('CAJA_CHICA')
 const compraSeleccionada =
   ref(null)
 
@@ -922,6 +929,7 @@ function verDetalle(
   compra
 ) {
 
+  viaEvaluacion.value = compra.via_adquisicion || 'CAJA_CHICA'
   compraSeleccionada.value =
     compra
 
@@ -956,6 +964,7 @@ function rechazarDesdeLista(
   compra
 ) {
 
+  viaEvaluacion.value = compra.via_adquisicion || 'CAJA_CHICA'
   compraSeleccionada.value =
     compra
 
@@ -973,6 +982,7 @@ async function aprobarDesdeLista(
   compra
 ) {
 
+  viaEvaluacion.value = compra.via_adquisicion || 'CAJA_CHICA'
   compraSeleccionada.value =
     compra
 
@@ -1051,8 +1061,6 @@ async function abrirSolicitante(
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1240,7 +1248,7 @@ async function aprobarCompra() {
 
   await ejecutarAccion(
     'evaluar-daf',
-    { califica: true },
+    { califica: true, via_adquisicion: viaEvaluacion.value },
     'aprobar',
     false,
     'Solicitud calificada como viable presupuestariamente.'
@@ -1339,8 +1347,6 @@ async function ejecutarAccion(
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1349,6 +1355,7 @@ async function ejecutarAccion(
     }
 
     if (!respuesta.ok) {
+      await mostrarErrorRegla(datos)
 
       errorAccion.value =
         datos.detalle
@@ -1479,8 +1486,6 @@ async function cargarCompras() {
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1490,6 +1495,7 @@ async function cargarCompras() {
 
 
     if (!respuesta.ok) {
+      await mostrarErrorRegla(datos)
 
       console.error(
         'Compras:',

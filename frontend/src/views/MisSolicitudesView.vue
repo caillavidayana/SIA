@@ -367,6 +367,7 @@
 
 
             <div class="request-side">
+              <span v-if="item.sla_estado==='VENCIDO'" class="status cancelled">Vencido</span>
 
               <span
                 :class="[
@@ -390,6 +391,7 @@
                 </button>
 
 
+                <button v-if="item.proceso==='SOPORTE' && item.puede_reabrir" class="edit" @click="reabrir(item)">Reabrir ticket</button>
                 <!--
                   La edición/anulación se conserva únicamente
                   para Soporte Técnico porque ese CRUD ya está
@@ -1187,6 +1189,7 @@
 
 
 <script setup>
+import { SigtaModal } from '../utils/swal'
 import DocumentosSolicitante from '../components/DocumentosSolicitante.vue'
 import UsuarioHeader from '../components/UsuarioHeader.vue'
 import AdminMenu from '../components/AdminMenu.vue'
@@ -1488,6 +1491,16 @@ async function cargarLista(
 // ==========================================================
 // CARGAR TODO
 // ==========================================================
+
+async function reabrir(item) {
+  const confirmacion=await SigtaModal.fire({title:'Reabrir ticket',text:'El ticket volverá a En proceso y conservará su cierre y expediente anterior.',icon:'question',showCancelButton:true,confirmButtonText:'Reabrir ticket',cancelButtonText:'Cancelar'})
+  if(!confirmacion.isConfirmed)return
+  try{
+    const r=await fetch(`/api/soporte/tickets/${item.id}/reabrir-ticket/`,{method:'POST',headers:{Authorization:`Token ${token()}`}})
+    const d=await r.json();if(!r.ok)throw new Error(d.detalle||'No fue posible reabrir el ticket.')
+    await cargarTodo();mostrarMensaje('Ticket reabierto. La fecha de cierre y el expediente anterior se conservaron.')
+  }catch(e){await SigtaModal.fire({title:'No se pudo reabrir',text:e.message,icon:'warning',confirmButtonText:'Entendido'})}
+}
 
 async function cargarTodo() {
 

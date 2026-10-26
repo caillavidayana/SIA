@@ -83,6 +83,12 @@ class ConfiguracionSMTPSerializer(
 class PreferenciaSistemaSerializer(
     serializers.ModelSerializer
 ):
+    limite_caja_chica = serializers.SerializerMethodField()
+
+    def get_limite_caja_chica(self, obj):
+        from django.conf import settings
+        return str(settings.SIA_LIMITE_CAJA_CHICA)
+
 
     actualizado_por_nombre = serializers.CharField(
         source="actualizado_por.nombre_completo",

@@ -131,17 +131,18 @@
     <ValidacionSolicitud v-if="validacionActiva" :registro="validacionActiva" :ocupado="procesando" :error="errorValidacion" @cerrar="validacionActiva = null" @validar="validar(validacionActiva)" @rechazar="rechazar(validacionActiva, $event)" />
     <ExpedienteSolicitudModal v-if="expedienteAbierto && itemActivo" :registro="itemActivo" @cerrar="expedienteAbierto=false" @evidencia="abrirEvidencia">
       <section v-if="itemActivo.estado_codigo==='RECIBIDO'" class="expediente-action"><h3>Validación del solicitante</h3><button class="sia-primary" :disabled="procesando" @click="validacionActiva=itemActivo">Validar requisitos</button></section>
-      <section v-else-if="itemActivo.estado_codigo==='VALIDADO' && !itemActivo.prioridad_jefatura" class="expediente-action">
+      <section v-else-if="itemActivo.estado_codigo==='VALIDADO' && !itemActivo.clasificado_en" class="expediente-action">
         <small>PASO 2</small><h3>Clasificar prioridad y SLA</h3>
-        <PrioridadSla v-model="formClasificar.prioridad" :opciones="prioridades" />
+        <PrioridadSla v-model="formClasificar.prioridad" :opciones="prioridades" :disabled="!!itemActivo?.prioridad_automatica" />
         <label class="sia-field">Criterio técnico<textarea v-model="formClasificar.criterio_prioridad" rows="3" placeholder="Justifique la prioridad" /></label>
         <div class="expediente-actions"><button class="sia-primary" :disabled="procesando || !formClasificar.prioridad || !formClasificar.criterio_prioridad.trim()" @click="clasificar">Guardar y continuar</button></div>
       </section>
       <section v-else-if="itemActivo.estado_codigo==='VALIDADO'" class="expediente-action">
         <small>PASO 3</small><h3>Asignar técnico</h3>
-        <label class="sia-field">Técnico activo de Mantenimiento<select v-model="formDesignar.tecnico_id"><option value="">Seleccione…</option><option v-for="t in tecnicos" :key="t.id" :value="t.id">{{ t.nombre_completo || t.email }} · {{ casosActivos(t.id) }} casos activos</option></select></label>
+        <label class="sia-field">Técnico activo de Mantenimiento<select v-model="formDesignar.tecnico_id"><option value="">Seleccione…</option><option v-for="t in tecnicos" :key="t.id" :value="t.id">{{ t.nombre_completo || t.email }} · {{ casosActivos(t.id) }} / {{t.limite_tickets}} casos activos</option></select></label>
         <div class="expediente-actions"><button class="sia-primary" :disabled="procesando || !formDesignar.tecnico_id" @click="confirmarAsignacion=true">Asignar técnico</button></div>
       </section>
+<CotizacionesExpediente :filas="itemActivo?.cotizaciones" />
       <section v-if="cotizacionCompra" class="expediente-action">
         <h3>Cotizaci&#243;n / proforma del t&#233;cnico</h3>
         <div class="viabilidad-documentos"><article><i>CT</i><div><b>Proforma adjunta</b><small>Documento presentado por el t&#233;cnico de mantenimiento</small></div><button class="sia-primary" @click="abrirEvidencia(cotizacionCompra,'Proforma del tecnico')">Ver proforma</button></article></div>
@@ -150,7 +151,7 @@
         <small>{{ compraValidada ? 'VIABILIDAD VALIDADA' : 'REQUERIMIENTO DE COMPRA RECIBIDO' }}</small><h3>{{ compraValidada ? 'Adjuntar POA y proveído' : 'Validar viabilidad' }}</h3><p v-if="compraValidada">Adjunte el POA y el proveído para completar el expediente y elevarlo a Compras.</p><p v-else>Revise la cotización y el informe técnico. Si la compra no es viable, registre el motivo: el técnico será informado y el caso se cerrará sin compra.</p>
         <dl class="viabilidad-datos"><div><dt>Técnico</dt><dd>{{ itemActivo.auxiliar_asignado_nombre || 'Sin asignar' }}</dd></div><div><dt>Diagnóstico</dt><dd>{{ itemActivo.diagnostico }}</dd></div><div><dt>Componente / cantidad</dt><dd>{{ itemActivo.producto_requerido }} · {{ itemActivo.cantidad_requerida || 1 }}</dd></div><div><dt>Características</dt><dd>{{ itemActivo.especificacion_producto }}</dd></div><div><dt>Precio estimado</dt><dd>Bs. {{ itemActivo.costo_estimado || 'Sin especificar' }}</dd></div></dl>
         <div class="viabilidad-documentos"><article><i>IT</i><div><b>Informe técnico de requerimiento</b><small>Generado automáticamente con el diagnóstico y el requerimiento del técnico</small></div><button class="sia-primary" @click="abrirEvidencia(`${base}/${itemActivo.id}/informe-requerimiento-pdf/`,'Informe técnico de requerimiento')">Visualizar</button></article></div>
-        <DecisionViabilidad v-model="decisionCompra" :validada="compraValidada" :ocupado="procesando" /><div v-if="compraValidada && decisionCompra==='si'" class="viabilidad-adjuntos"><label class="sia-field">POA<input type="file" accept=".pdf,.doc,.docx" @change="e=>formCompra.poa=e.target.files[0]"></label><label class="sia-field">Proveído de jefatura<input type="file" accept=".pdf,.doc,.docx" @change="e=>formCompra.pedido=e.target.files[0]"></label></div>
+        <DecisionViabilidad v-model="decisionCompra" :validada="compraValidada" :ocupado="procesando" /><div v-if="compraValidada && decisionCompra==='si'" class="viabilidad-adjuntos"><label class="sia-field">POA<ArchivoInput type="file" accept=".pdf,.doc,.docx" @change="e=>formCompra.poa=e.target.files[0]" /></label><label class="sia-field">Proveído de jefatura<ArchivoInput type="file" accept=".pdf,.doc,.docx" @change="e=>formCompra.pedido=e.target.files[0]" /></label></div>
         <div class="expediente-actions"><button class="sia-primary" :disabled="procesando || !decisionCompra" @click="confirmarCompra(decisionCompra==='si')">{{ decisionCompra==='no' ? 'Continuar: compra no viable' : compraValidada ? 'Elevar expediente a Compras' : 'Confirmar viabilidad' }}</button></div>
       </section>
       <section v-if="itemActivo.informe_trabajo" class="expediente-action">
@@ -203,6 +204,8 @@
 </template>
 
 <script setup>
+import {reglas,cargarReglas} from '../utils/reglas'
+import CotizacionesExpediente from '../components/CotizacionesExpediente.vue'
 import { solicitarFirma } from '../utils/firma'
 import DocumentosExpediente from '../components/DocumentosExpediente.vue'
 import PrioridadSla from '../components/PrioridadSla.vue'
@@ -230,7 +233,7 @@ const errorCarga = ref('')
 const itemActivo = ref(null)
 const detalle = ref(null)
 const expedienteAbierto=ref(false), confirmarAsignacion=ref(false), visorEvidencia=ref(''), visorEsImagen=ref(false), visorTitulo=ref('EVIDENCIA DEL SOLICITANTE'), confirmacionCompra=ref(null)
-const prioridades=[{codigo:'BAJA',nombre:'Baja',horas:48},{codigo:'MEDIA',nombre:'Media',horas:24},{codigo:'ALTA',nombre:'Alta',horas:8},{codigo:'URGENTE',nombre:'Urgente',horas:4}]
+const prioridades=computed(()=>[{codigo:'BAJA',nombre:'Baja'},{codigo:'MEDIA',nombre:'Media'},{codigo:'ALTA',nombre:'Alta'},{codigo:'URGENTE',nombre:'Urgente'}].map(p=>({...p,horas:reglas.value?.sla_horas?.[p.codigo==='URGENTE'?'CRITICA':p.codigo]})))
 const reporte = ref(null)
 
 const nombre = computed(() => usuario.value.nombre || usuario.value.nombre_completo || 'Jefe de Mantenimiento')
@@ -240,8 +243,8 @@ const saludo = computed(() => new Date().getHours() < 12 ? 'Buenos días' : new 
 
 /* Bandejas del BPMN */
 const porValidar = computed(() => items.value.filter(r => r.estado_codigo === 'RECIBIDO'))
-const porClasificar = computed(() => items.value.filter(r => r.estado_codigo === 'VALIDADO' && !r.prioridad_jefatura))
-const porDesignar = computed(() => items.value.filter(r => r.estado_codigo === 'VALIDADO' && !!r.prioridad_jefatura))
+const porClasificar = computed(() => items.value.filter(r => r.estado_codigo === 'VALIDADO' && !r.clasificado_en))
+const porDesignar = computed(() => items.value.filter(r => r.estado_codigo === 'VALIDADO' && !!r.clasificado_en))
 const ticketsGestion = computed(() => items.value.filter(r => ['RECIBIDO','VALIDADO','DERIVADO','EN_MANTENIMIENTO','EN_ESPERA_COMPRA','INFORME_REGISTRADO','CONFORMIDAD_INFORMADA'].includes(r.estado_codigo) && !r.informe_elevado_en))
 
 /* Búsqueda, filtro y paginación de la bandeja de "Gestión de tickets" */
@@ -252,7 +255,7 @@ const TICKETS_POR_PAGINA = 10
 
 function etapaTicket(r) {
   if (r.estado_codigo === 'RECIBIDO') return 'RECIBIDO'
-  if (!r.prioridad_jefatura) return 'CLASIFICAR'
+  if (!r.clasificado_en) return 'CLASIFICAR'
   return 'DESIGNAR'
 }
 
@@ -416,7 +419,7 @@ function irA(id) {
 function abrir(item) {
   decisionCompra.value = item.estado_compra_componente==='VIABLE'||item.compra_vinculada?'si':''
   itemActivo.value = item
-  formClasificar.prioridad = ''
+  formClasificar.prioridad = item.prioridad_automatica || item.prioridad_jefatura || ''
   formClasificar.criterio_prioridad = ''
   formDesignar.tecnico_id = ''
   formCompra.viable = true
@@ -450,7 +453,7 @@ function confirmarSalida() {
 
 /* Acciones del flujo */
 const validacionActiva = ref(null), errorValidacion = ref('')
-function casosActivos(id) { return items.value.filter(r => Number(r.auxiliar_asignado) === Number(id) && !['FINALIZADO','RECHAZADO'].includes(r.estado_codigo)).length }
+function casosActivos(id) { return tecnicos.value.find(t=>Number(t.id)===Number(id))?.carga_activa || 0 }
 async function validar(item) {
   try {
     await postAccion(item, 'validar-ticket', { es_valido: true })
@@ -594,6 +597,7 @@ let intervaloActualizacion = null
 async function abrirEvidencia(url,titulo="Evidencia del solicitante"){try{const r=await fetch(url,{headers:{Authorization:`Token ${token()}`},cache:'no-store'});if(!r.ok)throw new Error('No se pudo visualizar la evidencia.');const archivo=await r.blob();cerrarEvidencia();visorEsImagen.value=archivo.type.startsWith('image/');visorEvidencia.value=URL.createObjectURL(archivo);visorTitulo.value=titulo.toUpperCase()}catch(e){await animarError(e.message)}}
 function cerrarEvidencia(){if(visorEvidencia.value)URL.revokeObjectURL(visorEvidencia.value);visorEvidencia.value=''}
 onMounted(() => {
+  cargarReglas().catch(console.error)
   cargar()
   intervaloActualizacion = setInterval(cargar, 30000)
 })

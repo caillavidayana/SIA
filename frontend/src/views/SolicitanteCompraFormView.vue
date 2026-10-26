@@ -48,7 +48,7 @@
         <section class="form-section">
           <div class="section-title"><b>5</b><div><h2>Expediente documental</h2><p>Adjunte los cuatro documentos obligatorios para enviar el trámite a la DAF.</p></div></div>
           <div class="documents">
-            <label v-for="doc in documentos" :key="doc.campo"><span>{{ doc.nombre }} <em>*</em></span><small>{{ archivos[doc.campo]?.name || 'PDF o documento digital' }}</small><input type="file" required @change="seleccionar(doc.campo,$event)"></label>
+            <label v-for="doc in documentos" :key="doc.campo"><span>{{ doc.nombre }} <em>*</em></span><small>{{ archivos[doc.campo]?.name || 'PDF o documento digital' }}</small><ArchivoInput type="file" required @change="seleccionar(doc.campo,$event)" /></label>
           </div>
         </section>
 

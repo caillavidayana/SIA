@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 from django.core.files.base import ContentFile
+from django.db import transaction
 
 from rest_framework import (
     status,
@@ -45,6 +46,7 @@ from auditoria.utils import (
 from .models import (
     EstadoMantenimiento,
     RequerimientoMantenimiento,
+    CotizacionMantenimiento,
 )
 
 from .serializers import (
@@ -323,7 +325,9 @@ class RequerimientoMantenimientoViewSet(
                 "estado",
                 "responsable_servicios_generales",
                 "auxiliar_asignado",
+                "categoria",
             )
+            .prefetch_related('cotizaciones_r02')
             .order_by(
                 "-creado_en"
             )
@@ -764,6 +768,8 @@ class RequerimientoMantenimientoViewSet(
             )
 
         prioridad = str(request.data.get("prioridad", "")).strip().upper()
+        from config.reglas import prioridad_objeto
+        prioridad = prioridad_objeto(requerimiento) or prioridad
         criterio = str(request.data.get("criterio_prioridad", "")).strip()
 
         if prioridad not in {"BAJA", "MEDIA", "ALTA", "URGENTE"}:
@@ -805,6 +811,7 @@ class RequerimientoMantenimientoViewSet(
     # ======================================================
 
     @action(detail=True, methods=["post"], url_path="designar-revision")
+    @transaction.atomic
     def designar_revision(self, request, pk=None):
 
         if not tiene_rol(request.user, "SERVICIOS_GENERALES"):
@@ -814,6 +821,7 @@ class RequerimientoMantenimientoViewSet(
             )
 
         requerimiento = self.get_object()
+        requerimiento = RequerimientoMantenimiento.objects.select_for_update().get(pk=requerimiento.pk)
 
         if not estado_permitido(requerimiento, ["VALIDADO"]):
             return Response(
@@ -821,7 +829,7 @@ class RequerimientoMantenimientoViewSet(
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not requerimiento.prioridad_jefatura:
+        if not requerimiento.clasificado_en:
             return Response(
                 {"detalle": "Primero debe clasificar la prioridad."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -859,6 +867,10 @@ class RequerimientoMantenimientoViewSet(
                 {"tecnico_id": "El usuario seleccionado no es Técnico de Mantenimiento."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # R07: mismo cupo global de técnicos; la fila Usuario serializa asignaciones.
+        from soporte.carga_tecnica import bloquear_y_validar
+        bloquear_y_validar([tecnico.pk], excluir_mantenimiento=requerimiento.pk)
 
         if not self._cambiar_estado(requerimiento, "DERIVADO"):
             return Response({"detalle": "No existe el estado DERIVADO."}, status=400)
@@ -951,103 +963,109 @@ class RequerimientoMantenimientoViewSet(
     def guardar_borrador_requerimiento(self, request, pk=None):
         return self._guardar_requerimiento_compra(request, pk, borrador=True)
 
+    @staticmethod
+    def _archivos_cotizacion_r02(requerimiento):
+        """Devuelve rutas únicas, incluyendo la cotización histórica."""
+        archivos = {}
+        if requerimiento.cotizacion_archivo:
+            archivos[requerimiento.cotizacion_archivo.name] = requerimiento.cotizacion_archivo
+        for cotizacion in requerimiento.cotizaciones_r02.all():
+            if cotizacion.archivo:
+                archivos[cotizacion.archivo.name] = cotizacion.archivo
+        return archivos
+
+    @staticmethod
+    def _cantidad_requerida_r02(costo):
+        from compras.reglas_cotizaciones import requeridas
+        return requeridas(costo)
+
+    @staticmethod
+    def _validar_archivos_r02(archivos):
+        extensiones = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
+        for archivo in archivos:
+            if not archivo.name.lower().endswith(extensiones):
+                return "Las cotizaciones deben ser PDF, JPG, PNG o WEBP."
+            if archivo.size > 10 * 1024 * 1024:
+                return "Cada cotización debe tener un tamaño máximo de 10 MB."
+            if archivo.size == 0:
+                return "No se permiten cotizaciones vacías."
+        return None
+
+    @transaction.atomic
     def _guardar_requerimiento_compra(self, request, pk, borrador):
-
         requerimiento = self.get_object()
-
-        if not (
-            es_admin(request.user)
-            or requerimiento.auxiliar_asignado_id == request.user.id
-        ):
-            return Response(
-                {"detalle": "Solo el técnico asignado puede realizar el requerimiento."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
+        requerimiento = RequerimientoMantenimiento.objects.select_for_update().get(pk=requerimiento.pk)
+        if not (es_admin(request.user) or requerimiento.auxiliar_asignado_id == request.user.id):
+            return Response({"detalle": "Solo el técnico asignado puede realizar el requerimiento."}, status=403)
         if not estado_permitido(requerimiento, ["DERIVADO", "EN_MANTENIMIENTO"]):
-            return Response(
-                {"detalle": "El requerimiento debe estar en atención técnica."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+            return Response({"detalle": "El requerimiento debe estar en atención técnica."}, status=400)
         if requerimiento.estado_compra_componente:
-            return Response(
-                {"detalle": "Este requerimiento ya tiene una compra en curso."},
-                status=status.HTTP_409_CONFLICT
-            )
+            return Response({"detalle": "Este requerimiento ya tiene una compra en curso."}, status=409)
 
         producto = str(request.data.get("producto_requerido", "")).strip()
-
         if not producto and not borrador:
-            return Response(
-                {"producto_requerido": "Indique el componente requerido."},
-                status=400
-            )
-
+            return Response({"producto_requerido": "Indique el componente requerido."}, status=400)
         try:
             cantidad = int(request.data.get("cantidad_requerida") or 1)
         except (TypeError, ValueError):
             return Response({"cantidad_requerida": "Cantidad inválida."}, status=400)
-
         if cantidad <= 0:
-            return Response(
-                {"cantidad_requerida": "La cantidad debe ser mayor a cero."},
-                status=400
-            )
-
-        costo = request.data.get("costo_estimado")
-
+            return Response({"cantidad_requerida": "La cantidad debe ser mayor a cero."}, status=400)
+        costo_raw = request.data.get("costo_estimado")
         try:
-            costo = Decimal(str(costo)) if costo not in (None, "") else None
-        except InvalidOperation:
+            costo = Decimal(str(costo_raw)) if costo_raw not in (None, "") else None
+        except (InvalidOperation, TypeError):
             return Response({"costo_estimado": "Monto estimado inválido."}, status=400)
+        if costo is not None and (not costo.is_finite() or costo < 0):
+            return Response({"costo_estimado": "El monto debe ser un número no negativo."}, status=400)
+        if not borrador and costo is None:
+            return Response({"costo_estimado": "Indique el costo estimado antes de enviar."}, status=400)
+
+        from config.reglas import monto_valido, error_limite
+        from compras.reglas_cotizaciones import nuevas_cotizaciones, validar_cotizaciones, guardar_cotizaciones, actualizar_proveedores
+        costo = monto_valido(costo_raw, requerido=not borrador)
+        # La vía corresponde a DAF; el técnico no puede seleccionarla.
+        via = requerimiento.via_compra
+        # REQUERIMIENTO 1 (R01): el envío técnico no admite superar el límite.
+        error = error_limite(costo, 'CAJA_CHICA')
+        if error and not borrador:
+            return Response(error, status=400)
+        actualizar_proveedores(requerimiento, request)
+        nuevos = nuevas_cotizaciones(request)
+        if not borrador:
+            validar_cotizaciones(requerimiento, costo, nuevos)
+        requerimiento.via_compra = via
 
         requerimiento.requiere_reposicion = True
         requerimiento.producto_requerido = producto
-        requerimiento.especificacion_producto = str(
-            request.data.get("especificacion_producto", "")
-        ).strip()
+        requerimiento.especificacion_producto = str(request.data.get("especificacion_producto", "")).strip()
         requerimiento.cantidad_requerida = cantidad
         requerimiento.costo_estimado = costo
-        cotizacion_compra = request.FILES.get("cotizacion_archivo") or requerimiento.cotizacion_archivo
         if borrador and request.FILES.get("informe_compra"):
             requerimiento.informe_compra = request.FILES["informe_compra"]
-        if not borrador and not cotizacion_compra:
-            return Response({"detalle": "Adjunte la cotización antes de enviar a jefatura."}, status=400)
+
+        guardar_cotizaciones(requerimiento, nuevos, request.user)
+
         if not borrador:
             requerimiento.informe_compra.save(
                 f"informe-requerimiento-{requerimiento.codigo}.pdf",
                 ContentFile(informe_requerimiento_mantenimiento(requerimiento)), save=False,
             )
-        if not borrador:
             requerimiento.estado_compra_componente = "SOLICITADA"
-
-        cotizacion = request.FILES.get("cotizacion_archivo")
-
-        if cotizacion:
-            requerimiento.cotizacion_archivo = cotizacion
-
-        if not borrador:
             self._cambiar_estado(requerimiento, "EN_ESPERA_COMPRA")
         requerimiento.save()
-
         registrar_bitacora(
             request=request,
-            accion="SOLICITAR_REQUERIMIENTO_MANTENIMIENTO",
+            accion="GUARDAR_BORRADOR_REQUERIMIENTO_MANTENIMIENTO" if borrador else "SOLICITAR_REQUERIMIENTO_MANTENIMIENTO",
             modulo="Mantenimiento",
-            detalle=(
-                f"El técnico solicitó '{producto}' con cotización para "
-                f"{requerimiento.codigo}. Pendiente de evaluar viabilidad."
-            ),
+            detalle=f"{requerimiento.codigo}: {'borrador guardado' if borrador else 'requerimiento enviado'}; {len(self._archivos_cotizacion_r02(requerimiento))} cotización(es).",
             nivel="INFO",
         )
-
         return respuesta_requerimiento(
             requerimiento,
             "Borrador guardado." if borrador else "Requerimiento enviado al Jefe de Mantenimiento para evaluar su viabilidad.",
-            request
+            request,
         )
-
 
     # ======================================================
     # 6. RECIBIR REQUERIMIENTO Y EVALUAR VIABILIDAD  (Jefe)
@@ -1094,9 +1112,14 @@ class RequerimientoMantenimientoViewSet(
         requerimiento = self.get_object()
         if requerimiento.estado_compra_componente != 'SOLICITADA' or requerimiento.derivado_compra:
             return Response({'detalle': 'La compra no está pendiente de validación.'}, status=400)
+        from compras.reglas_cotizaciones import validar_cotizaciones
+        validar_cotizaciones(requerimiento)
         from compras.informes_origen import asegurar_informe_tecnico
         informe = asegurar_informe_tecnico(requerimiento)
         cotizacion = requerimiento.cotizacion_archivo
+        requeridas = self._cantidad_requerida_r02(requerimiento.costo_estimado)
+        if len(self._archivos_cotizacion_r02(requerimiento)) < requeridas:
+            return Response({"detalle": f"R02: Se requieren al menos {requeridas} cotizaciones antes de validar."}, status=400)
         if not informe or not cotizacion:
             return Response({'detalle': 'Revise y adjunte el informe técnico y la cotización antes de validar.'}, status=400)
         requerimiento.informe_compra = informe
@@ -1108,6 +1131,7 @@ class RequerimientoMantenimientoViewSet(
         return respuesta_requerimiento(requerimiento, 'Viabilidad validada. Adjunte el POA y el proveído para elevar la compra.', request)
 
     @action(detail=True, methods=["post"], url_path="evaluar-viabilidad-compra")
+    @transaction.atomic
     def evaluar_viabilidad_compra(self, request, pk=None):
 
         if not (es_admin(request.user) or tiene_rol(request.user, "SERVICIOS_GENERALES")):
@@ -1150,6 +1174,8 @@ class RequerimientoMantenimientoViewSet(
             requerimiento.motivo_no_viable = motivo
             requerimiento.activo = False
             requerimiento.save()
+            from config.reglas import notificar_rechazo
+            notificar_rechazo(requerimiento, motivo)
 
             registrar_bitacora(
                 request=request,
@@ -1165,9 +1191,14 @@ class RequerimientoMantenimientoViewSet(
 
         from compras.models import SolicitudCompra
 
+        from compras.reglas_cotizaciones import validar_cotizaciones
+        validar_cotizaciones(requerimiento)
         from compras.informes_origen import asegurar_informe_tecnico
         informe = asegurar_informe_tecnico(requerimiento)
         proforma = requerimiento.cotizacion_archivo
+        requeridas = self._cantidad_requerida_r02(requerimiento.costo_estimado)
+        if len(self._archivos_cotizacion_r02(requerimiento)) < requeridas:
+            return Response({"detalle": f"R02: Se requieren al menos {requeridas} cotizaciones para elevar la compra."}, status=400)
         poa = request.FILES.get("poa")
         pedido = request.FILES.get("pedido")
         if not all((informe, proforma, poa, pedido)):
@@ -1188,6 +1219,7 @@ class RequerimientoMantenimientoViewSet(
             especificaciones=requerimiento.especificacion_producto,
             justificacion=f"Requerido para atender el mantenimiento {requerimiento.codigo}.",
             monto_estimado=requerimiento.costo_estimado,
+            via_adquisicion=requerimiento.via_compra,
             estado="CREADO_PENDIENTE_DAF",
             origen_modulo="MANTENIMIENTO",
             requerimiento_mantenimiento=requerimiento,
@@ -1196,6 +1228,9 @@ class RequerimientoMantenimientoViewSet(
             proforma=proforma,
             pedido=pedido,
         )
+
+        from compras.reglas_cotizaciones import transferir_cotizaciones
+        transferir_cotizaciones(requerimiento, solicitud, request.user)
 
         requerimiento.estado_compra_componente = "VIABLE"
         requerimiento.derivado_compra = True

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -19,6 +20,119 @@ from pathlib import Path
 # ==========================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+from dotenv import load_dotenv
+# No sobrescribe el entorno del servicio ni los archivos de configuración.
+load_dotenv(os.environ.get('SIA_ENV_FILE', BASE_DIR.parent / '.env'), override=False)
+
+# ==================================================
+# R01 - LÍMITE CONFIGURABLE DE CAJA CHICA
+# Variable: SIA_LIMITE_CAJA_CHICA
+# Función: impedir compras que superen el límite
+# R02 y R03 comparten esta configuración con la interfaz.
+# ==================================================
+# ==========================================================
+# INDICE PARA LA DEFENSA: buscar con Ctrl + Shift + F
+# 1. CAJA CHICA (R01): SIA_LIMITE_CAJA_CHICA en .env.
+# 2. COTIZACIONES (R02): umbral, cantidad y proveedores en .env.
+# 3. PRIORIDAD AUTOMATICA (R03): categorias/palabras, debajo en este archivo.
+# 4. TIEMPOS DE ATENCION (R04): SIA_SLA_*_HORAS en .env.
+# 5. FLUJO DE ESTADOS (R05): config/flujo_tickets.py.
+# 6. REAPERTURA (R06): SIA_DIAS_REAPERTURA en .env.
+# 7. CARGA DEL TECNICO (R07): SIA_MAX_TICKETS_TECNICO en .env.
+# 8. APROBACION DE COMPRA (R08): SIA_REQUIERE_APROBACION_DIRECTOR en .env.
+# 9. FONDO Y SALDO (R09): SIA_FONDO_MENSUAL en .env.
+# 10. CONTRASENAS (R10): OPTIONS.min_length mas abajo en este archivo.
+# IMPORTANTE: .env prevalece sobre los valores por defecto de os.environ.get.
+# Las variables definidas en la terminal prevalecen incluso sobre .env.
+# Para cambiar un numero existente, editar .env y reiniciar Django.
+# Vue consulta la API: actualizar el navegador; no duplicar valores en Vue.
+# Guia con ejemplos: MAPA_CAMBIOS_DEFENSA.md.
+# ==========================================================
+
+# 1. CAJA CHICA (R01)
+# CAMBIAR EN .env: SIA_LIMITE_CAJA_CHICA=1500 (valor vigente inicial: 1000).
+# Efecto: permite 1200 si tambien cumple las cotizaciones de R02 y el saldo.
+# Reiniciar Django. No cambiar solo el '1000' de abajo si .env ya lo define.
+SIA_LIMITE_CAJA_CHICA = Decimal(os.environ.get('SIA_LIMITE_CAJA_CHICA', '1000'))
+# REQUERIMIENTO 2 (R02): cotizaciones adicionales, independiente de R01.
+# 2. COTIZACIONES (R02)
+# CAMBIAR EN .env: SIA_UMBRAL_COTIZACIONES=800 (inicial: 500).
+# Para pedir 4 documentos: SIA_COTIZACIONES_MINIMAS=4.
+# True exige proveedores distintos. El umbral es independiente de R01.
+# Funciones: compras/reglas_cotizaciones.py -> requeridas/progreso.
+SIA_UMBRAL_COTIZACIONES = Decimal(os.environ.get('SIA_UMBRAL_COTIZACIONES', '500'))
+SIA_COTIZACIONES_MINIMAS = int(os.environ.get('SIA_COTIZACIONES_MINIMAS', '3'))
+SIA_PROVEEDORES_DISTINTOS = os.environ.get('SIA_PROVEEDORES_DISTINTOS', 'True').lower() == 'true'
+# 3. PRIORIDAD AUTOMATICA (R03)
+# CAMBIAR AQUI: usar el codigo real del catalogo, por ejemplo HARDWARE.
+# Ejemplo: SIA_CATEGORIAS_PRIORIDAD = ('HARDWARE', 'SERVIDOR', 'SERVIDORES')
+# Eso sustituye RED/REDES por HARDWARE y mantiene Servidores.
+# Las palabras del titulo/descripcion de la linea siguiente son otra causa
+# independiente de prioridad Alta: si tampoco debe activarse por la palabra
+# red, cambiar SIA_PALABRAS_PRIORIDAD a ('hardware',) o a () para solo categoria.
+# Reiniciar Django y actualizar navegador. No editar el comparador en Vue.
+# Se aplica a solicitudes nuevas o editadas; no reclasifica todo el historial.
+SIA_CATEGORIAS_PRIORIDAD = ('RED', 'REDES', 'SERVIDOR', 'SERVIDORES')
+SIA_PALABRAS_PRIORIDAD = ('red', 'conectividad de internet')
+SIA_PRIORIDAD_AUTOMATICA = 'ALTA'
+
+# R04 - SLA al crear: Alta 4 h, Media 24 h, Baja 72 h.
+# Cambiar SIA_SLA_*_HORAS en .env y reiniciar Django; Vue consulta la API.
+# 4. TIEMPOS DE ATENCION (R04)
+# CAMBIAR EN .env, por ejemplo SIA_SLA_ALTA_HORAS=6 (inicial: 4).
+# Media=24 y Baja=72. config/sla.py calcula fechas con estos valores.
+# No reescribe masivamente los vencimientos ya guardados de tickets antiguos.
+SIA_SLA_HORAS = {
+    'ALTA': int(os.environ.get('SIA_SLA_ALTA_HORAS', '4')),
+    'MEDIA': int(os.environ.get('SIA_SLA_MEDIA_HORAS', '24')),
+    'BAJA': int(os.environ.get('SIA_SLA_BAJA_HORAS', '72')),
+    'CRITICA': int(os.environ.get('SIA_SLA_CRITICA_HORAS', '4')),
+}
+# R06 - Reapertura del solicitante conservando fecha de cierre.
+# 5. FLUJO DE ESTADOS (R05)
+# CAMBIAR EN config/flujo_tickets.py: TRANSICIONES_PERMITIDAS y el mapa de fases.
+# No hay un numero de .env para esta regla; conservar acciones y permisos.
+
+# 6. REAPERTURA (R06)
+# CAMBIAR EN .env: SIA_DIAS_REAPERTURA=10 (inicial: 7).
+# soporte/reapertura.py -> puede_reabrir/fecha_maxima. Conserva cerrado_en.
+SIA_DIAS_REAPERTURA = int(os.environ.get('SIA_DIAS_REAPERTURA', '7'))
+# R07 - Máximo de tickets activos; cambiar a 8 aquí mediante .env.
+# 7. CARGA DEL TECNICO (R07)
+# CAMBIAR EN .env: SIA_MAX_TICKETS_TECNICO=8 (inicial: 5).
+# soporte/carga_tecnica.py -> bloquear_y_validar; incluye apoyos/mantenimiento.
+SIA_MAX_TICKETS_TECNICO = int(os.environ.get('SIA_MAX_TICKETS_TECNICO', '5'))
+# REQUERIMIENTO 8 (R08): DAF certifica y deriva a Tesorería sin Director.
+# True permite recuperar el paso anterior mediante configuración y reinicio.
+# 8. APROBACION DE COMPRA (R08)
+# CAMBIAR EN .env: False = DAF deriva directo a Tesoreria (flujo vigente).
+# True = reactivar expresamente la aprobacion anterior del Director.
+# El umbral 300/grupo de abajo SOLO interviene cuando esta opcion es True.
+# compras/views.py -> certificar_daf/_transicion; no elimina permisos de DAF.
+SIA_REQUIERE_APROBACION_DIRECTOR = os.environ.get('SIA_REQUIERE_APROBACION_DIRECTOR', 'False').lower() == 'true'
+# Umbral/grupo solo se utilizan si se reactiva la aprobación del Director.
+SIA_UMBRAL_APROBACION_ADMINISTRATIVA = Decimal(os.environ.get('SIA_UMBRAL_APROBACION_ADMINISTRATIVA', '300'))
+SIA_GRUPO_APROBADOR = os.environ.get('SIA_GRUPO_APROBADOR', 'Jefe administrativo')
+# ==================================================
+# R09 - FONDO MENSUAL Y CONTROL DE SALDO
+# Configuración: SIA_FONDO_MENSUAL
+# Valor inicial: 5000. Ejemplo: SIA_FONDO_MENSUAL=7000
+# Función: impedir compras que superen el saldo.
+# Cambiar .env y reiniciar Django; no recompilar Vue.
+# ==================================================
+# 9. FONDO Y SALDO (R09)
+# CAMBIAR EN .env: SIA_FONDO_MENSUAL=7000 (inicial: 5000).
+# compras/caja_chica.py -> resumen/registrar_operacion. Tesoreria lee la API.
+# No cambiar saldos a mano: se calculan desde compromisos y desembolsos.
+SIA_FONDO_MENSUAL = Decimal(os.environ.get('SIA_FONDO_MENSUAL', '5000'))
+if (not SIA_LIMITE_CAJA_CHICA.is_finite() or SIA_LIMITE_CAJA_CHICA <= 0
+        or not SIA_UMBRAL_COTIZACIONES.is_finite() or SIA_UMBRAL_COTIZACIONES < 0
+        or SIA_COTIZACIONES_MINIMAS < 1 or any(h <= 0 for h in SIA_SLA_HORAS.values())
+        or SIA_DIAS_REAPERTURA < 0 or SIA_MAX_TICKETS_TECNICO < 1
+        or not SIA_FONDO_MENSUAL.is_finite() or SIA_FONDO_MENSUAL <= 0
+        or not SIA_UMBRAL_APROBACION_ADMINISTRATIVA.is_finite() or SIA_UMBRAL_APROBACION_ADMINISTRATIVA < 0):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('Revise los límites, plazos y cantidades configurados para las reglas SIA.')
 
 
 # ==========================================================
@@ -190,9 +304,17 @@ PASSWORD_HASHERS = [
 
 
 # ==========================================================
-# VALIDACIÓN DE CONTRASEÑAS
+# R10 - VALIDACIÓN DE CONTRASEÑAS
+# Política vigente: mínimo 10, no numérica ni similar al usuario; Argon2id.
+# Se conserva la compatibilidad PBKDF2 y el flujo de autenticación existente.
 # ==========================================================
 
+# 10. CONTRASENAS (R10)
+# CAMBIAR AQUI: OPTIONS -> min_length del MinimumLengthValidator, abajo.
+# Ejemplo: cambiar 10 a 12. Reiniciar Django; las pantallas leen el minimo
+# con /api/configuracion-publica/. No editar otro numero en el frontend.
+# No cambia contrasenas/hashes existentes ni exige migracion.
+# Mantener los otros validadores (similitud, comunes, solo numeros).
 AUTH_PASSWORD_VALIDATORS = [
 
     {
@@ -206,7 +328,7 @@ AUTH_PASSWORD_VALIDATORS = [
             'django.contrib.auth.password_validation.'
             'MinimumLengthValidator',
         'OPTIONS': {
-            'min_length': 8,
+            'min_length': 10, #R10 - minimo 10 caracteres
         },
     },
 
@@ -273,6 +395,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # ==========================================================
 
 AUTH_USER_MODEL = 'usuarios.Usuario'
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # ==========================================================
@@ -306,11 +429,7 @@ REST_FRAMEWORK = {
 # Después cambiaremos este MAILER por Outlook / Microsoft 365.
 # ==========================================================
 
-MAILERS = {
-
-    'default': {
-
-        'BACKEND':
-            'django.core.mail.backends.console.EmailBackend',
-    },
-}
+EMAIL_BACKEND = os.environ.get(
+    'DJANGO_EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend',
+)

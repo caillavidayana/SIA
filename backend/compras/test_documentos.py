@@ -1,3 +1,4 @@
+from config.testing import cerrar_respuesta
 from io import StringIO
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -116,7 +117,7 @@ class DocumentosCompraTests(APITestCase):
         r = self.client.get(enlace)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r['Cache-Control'], 'private, no-store')
-        r.close()
+        cerrar_respuesta(r)
         self.assertEqual(r['X-Frame-Options'], 'SAMEORIGIN')
         self.assertEqual(self.client.get('/media/' + self.compra.factura.name).status_code, 401)
         token.delete()

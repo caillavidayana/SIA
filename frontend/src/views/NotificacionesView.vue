@@ -60,7 +60,7 @@ async function cargar(){
 }
 async function marcarLeida(n){await fetch(`/api/soporte/notificaciones/${n.id}/marcar-leida/`,{method:'POST',headers:headers()});n.leida=true;emit("actualizadas",pendientes.value)}
 async function marcarTodas(){await fetch('/api/soporte/notificaciones/marcar-todas-leidas/',{method:'POST',headers:headers()});notificaciones.value.forEach(n=>n.leida=true);emit("actualizadas",pendientes.value)}
-async function verDetalle(n){if(!n.leida)await marcarLeida(n);router.push(esTecnico?{path:'/especialista/dashboard',query:{ticket:n.ticket}}:{path:'/usuario/mis-solicitudes',query:{proceso:'SOPORTE',id:n.ticket,origen:'notificaciones'}})}
+async function verDetalle(n){if(n.mantenimiento){if(!n.leida)await marcarLeida(n);router.push({path:'/auxiliar-servicios-generales/dashboard',query:{vista:'historial',requerimiento:n.mantenimiento}});return}if(!n.leida)await marcarLeida(n);router.push(esTecnico?{path:'/especialista/dashboard',query:{ticket:n.ticket}}:{path:'/usuario/mis-solicitudes',query:{proceso:'SOPORTE',id:n.ticket,origen:'notificaciones'}})}
 function fecha(v){return new Date(v).toLocaleString('es-BO',{dateStyle:'medium',timeStyle:'short'})}
 const mostrarLogout=ref(false)
 function salir(){localStorage.removeItem('sigta_token');localStorage.removeItem('sigta_usuario');router.push('/login')}

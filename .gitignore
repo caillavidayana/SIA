@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
 backend/.venv/
+.env
+.env.*
+!.env.example
+/.runtime/
+/backend/.venv-local/
 
 /respaldo-sia-*.bundle
 /.sia-respaldo/

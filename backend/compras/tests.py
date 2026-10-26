@@ -1,3 +1,4 @@
+from django.test import override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from rest_framework.test import APITestCase
@@ -5,6 +6,7 @@ from rest_framework.test import APITestCase
 from usuarios.models import Area, Rol, Usuario, UsuarioRol
 
 
+@override_settings(SIA_REQUIERE_APROBACION_DIRECTOR=True)
 class FlujoCajaChicaTests(APITestCase):
     def setUp(self):
         # Carga el catálogo real de roles/permisos (Permiso +
@@ -215,7 +217,7 @@ class SeguridadFlujoComprasTests(APITestCase):
         }, format="json")
         self.assertEqual(r.status_code, 409, r.data)
 
-    def test_tesoreria_no_puede_desembolsar_sin_autorizacion_del_director(self):
+    def test_tesoreria_recibe_sin_director_pero_exige_recibo_firmado(self):
         pk = self.crear_solicitud()
         self.autenticar("DAF")
         self.client.post(f"/api/compras/solicitudes/{pk}/evaluar-daf/", {"califica": True}, format="json")
@@ -225,10 +227,11 @@ class SeguridadFlujoComprasTests(APITestCase):
         r = self.client.post(f"/api/compras/solicitudes/{pk}/desembolsar/", {
             "monto_desembolsado": "100.00", "responsable_adquisicion": "Almacén",
         }, format="json")
-        self.assertEqual(r.status_code, 409, r.data)
+        self.assertEqual(r.status_code, 400, r.data)
+        self.assertIn("recibo", str(r.data).lower())
 
         r = self.client.get(f"/api/compras/solicitudes/{pk}/")
-        self.assertEqual(r.data["estado"], "VERIFICADO_PENDIENTE_AUTORIZACION")
+        self.assertEqual(r.data["estado"], "APROBADO_PARA_DESEMBOLSO")
 
     def test_tesoreria_no_puede_ejecutar_accion_de_daf(self):
         pk = self.crear_solicitud()

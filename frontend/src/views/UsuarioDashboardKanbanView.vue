@@ -93,21 +93,28 @@ const definiciones = [
 ]
 const columnas = computed(() => definiciones.map(([codigo,titulo,clase]) => ({ codigo,titulo,clase,items: solicitudes.value.filter(x => bucket(x.estado_codigo) === codigo) })))
 
-async function endpoint(url) {
+async function endpoint(url, nombre) {
   const r = await fetch(url, { headers: { Authorization: `Token ${token()}`, Accept: 'application/json' } })
-  if (!r.ok) throw new Error(`No se pudo consultar ${url.includes('soporte') ? 'Soporte Técnico' : 'Mantenimiento'}.`)
-  return lista(await r.json())
+  const datos = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(r.status === 401 ? 'La sesión expiró. Inicie sesión nuevamente.' : `No se pudo consultar ${nombre} (HTTP ${r.status}). ${datos.detalle || datos.detail || ''}`)
+  return lista(datos)
 }
 async function cargar() {
   cargando.value = true; error.value = ''
   try {
-    const [soporte,mantenimiento,notificaciones] = await Promise.all([endpoint('/api/soporte/tickets/?propias=1'),endpoint('/api/mantenimiento/requerimientos/?propias=1'),endpoint('/api/soporte/notificaciones/')])
+    const resultados = await Promise.allSettled([
+      endpoint('/api/soporte/tickets/?propias=1', 'Soporte Técnico'),
+      endpoint('/api/mantenimiento/requerimientos/?propias=1', 'Mantenimiento'),
+      endpoint('/api/soporte/notificaciones/', 'Notificaciones'),
+    ])
+    const [soporte,mantenimiento,notificaciones] = resultados.map(r => r.status === 'fulfilled' ? r.value : [])
+    error.value = [...new Set(resultados.filter(r => r.status === 'rejected').map(r => r.reason.message))].join(' ')
     notificacionesPendientes.value=notificaciones.filter(n=>!n.leida).length
     solicitudes.value = [
-      ...soporte.map(x => ({...x,proceso:'SOPORTE',modulo:'Soporte Técnico',estado_codigo:x.estado_codigo||x.estado,estado_nombre:x.estado_nombre||x.estado_codigo,fecha:x.creado_en||x.created_at})),
+      ...soporte.map(x => ({...x,proceso:'SOPORTE',modulo:'Soporte Técnico',fecha:x.creado_en||x.created_at})),
       ...mantenimiento.map(x => ({...x,proceso:'MANTENIMIENTO',modulo:'Mantenimiento',estado_codigo:x.estado_codigo||x.estado,estado_nombre:x.estado_nombre||x.estado_codigo,fecha:x.creado_en||x.created_at})),
     ].sort((a,b) => new Date(b.fecha||0)-new Date(a.fecha||0))
-  } catch (e) { error.value = e.message } finally { cargando.value = false }
+  } finally { cargando.value = false }
 }
 function abrirColumna(estado) { router.push({path:'/usuario/mis-solicitudes',query:{estado}}) }
 function abrirDetalle(item) {

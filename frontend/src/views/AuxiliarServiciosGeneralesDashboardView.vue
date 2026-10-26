@@ -26,6 +26,7 @@
 
       <div v-if="errorCarga" class="error-carga"><b>No se pudieron cargar los requerimientos.</b><span>{{ errorCarga }}</span></div>
 
+      <NotificacionesView v-if="vista==='notificaciones'" embedded />
       <!-- ============================ RESUMEN ============================ -->
       <section v-if="vista==='resumen'">
         <div class="hero">
@@ -151,13 +152,11 @@
                         <input v-monto inputmode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" v-model="formComponente.costo_estimado" type="text" min="0" max="9999999999.99" step="0.01" class="full-select">
                       </label>
                       <a v-if="ordenAbierta?.informe_compra" :href="ordenAbierta.informe_compra" target="_blank">Ver informe de requerimiento generado</a>
-                      <label class="campo">Cotización (obligatoria)
-                        <input type="file" accept="application/pdf,image/*" @change="onCotizacion" class="full-select">
-                      </label>
+                      <CotizacionesRequerimiento ref="cotizacionesFormulario" :expediente="ordenAbierta?.id" :guardadas="ordenAbierta?.cotizaciones || []" :monto="formComponente.costo_estimado" />
 
                       <div class="step-actions mt-2">
                         <button class="reject" @click="cerrarOrden">Cancelar</button>
-                        <button class="step-btn" :disabled="procesando" @click="guardarBorradorCompra">Guardar borrador</button><button class="primary flex-btn" :disabled="procesando||!formComponente.producto_requerido.trim() || !(formComponente.archivo || ordenAbierta?.cotizacion_archivo)" @click="enviarRequerimiento">Enviar requerimiento</button>
+                        <button class="step-btn" :disabled="procesando" @click="guardarBorradorCompra">Guardar borrador</button><button class="primary flex-btn" :disabled="procesando||!formComponente.producto_requerido.trim()" @click="enviarRequerimiento">Enviar requerimiento</button>
                       </div>
                     </div>
                   </div>
@@ -190,7 +189,7 @@
               <div class="wf-step" :class="{active:pasoTrabajo===1,completed:pasoTrabajo>1}"><div class="step-num">1</div><div class="step-content"><h4>Revisar requerimiento y documentación</h4><p v-if="pasoTrabajo===1">Revise el detalle, diagnóstico, evidencia y antecedentes antes de intervenir el equipo.</p><div v-if="pasoTrabajo===1" class="step-form"><div class="revision-documentos"><div><b>Descripción del requerimiento</b><span>{{ itemActivo.descripcion || 'Sin descripción registrada.' }}</span></div><div><b>Diagnóstico técnico</b><span>{{ itemActivo.diagnostico || 'Sin diagnóstico registrado.' }}</span></div><div><b>Plan de solución</b><span>{{ itemActivo.plan_solucion || 'Sin plan registrado.' }}</span></div><a v-if="itemActivo.evidencia_archivo_url" :href="itemActivo.evidencia_archivo_url" target="_blank" class="evidence-btn">Abrir evidencia reportada</a><span v-else class="sin-adjunto">No existe evidencia adjunta.</span><button v-if="itemActivo.compra_vinculada?.acta_conformidad" class="evidence-btn" @click="abrirEvidencia(itemActivo.compra_vinculada.acta_conformidad, 'Acta de conformidad')">Abrir acta de conformidad</button><span v-if="itemActivo.compra_vinculada && !itemActivo.compra_vinculada.acta_conformidad" class="sin-adjunto">La compra vinculada no tiene acta disponible.</span></div><button class="detalle-btn" @click="verItem(itemActivo)">Ver detalle completo</button><div v-if="pasoTrabajo===1" class="step-actions"><button class="reject" @click="cerrarTrabajo">Cancelar</button><button class="flex-btn primary" @click="pasoTrabajo=2">Siguiente</button></div></div></div></div>
               <div class="wf-step" :class="{active:pasoTrabajo===2,completed:pasoTrabajo>2,locked:pasoTrabajo<2}"><div class="step-num">2</div><div class="step-content"><h4>Registrar reparación o instalación</h4><p v-if="pasoTrabajo===2">El técnico documenta el trabajo ejecutado. Puede completar o corregir la información antes de continuar.</p><div v-if="pasoTrabajo===2" class="step-form"><label class="campo">Reparación o instalación realizada<textarea v-model="formTrabajo.trabajo_realizado" rows="5" placeholder="Trabajo ejecutado sobre el equipo o instalación"></textarea></label><label class="campo">Observaciones<textarea v-model="formTrabajo.observaciones_trabajo" rows="2" placeholder="Observaciones de la intervención"></textarea></label><div v-if="pasoTrabajo===2" class="step-actions"><button class="reject" @click="pasoTrabajo=1">Retroceder</button><button class="flex-btn primary" :disabled="procesando||!formTrabajo.trabajo_realizado.trim()" @click="registrarTrabajo">Guardar reparación y continuar</button></div></div></div></div>
               <div class="wf-step" :class="{active:pasoTrabajo===3,completed:pasoTrabajo>3,locked:pasoTrabajo<3}"><div class="step-num">3</div><div class="step-content"><h4>Registrar pruebas técnicas</h4><p v-if="pasoTrabajo===3">El técnico registra las pruebas efectuadas y su resultado antes de preparar el informe.</p><div v-if="pasoTrabajo===3" class="step-form"><label class="campo">Resultado de las pruebas técnicas<textarea v-model="formPruebas.resultado_pruebas" rows="4" placeholder="Pruebas efectuadas y comportamiento del equipo"></textarea></label><div v-if="pasoTrabajo===3" class="step-actions"><button class="reject" @click="pasoTrabajo=2">Retroceder</button><button class="flex-btn primary" :disabled="procesando||!formPruebas.resultado_pruebas.trim()" @click="registrarPruebas">Guardar pruebas y continuar</button></div></div></div></div>
-              <div class="wf-step" :class="{active:pasoTrabajo===4,locked:pasoTrabajo<4}"><div class="step-num">4</div><div class="step-content"><h4>Elaborar informe al Jefe de Mantenimiento</h4><p v-if="pasoTrabajo===4">Redacte el informe con el resumen del trabajo, las pruebas y el resultado. Al enviarlo, el Jefe de Mantenimiento recibirá el caso.</p><div v-if="pasoTrabajo===4" class="step-form"><label class="campo">Informe al Jefe de Mantenimiento<textarea v-model="formInforme.informe_trabajo" rows="6" placeholder="Describa el trabajo realizado, componentes utilizados, pruebas efectuadas y resultado final."></textarea></label><label class="campo">Informe técnico con cuadros / fotografía del trabajo<input type="file" accept="application/pdf,image/*" @change="onFotografia"></label><div class="step-actions"><button class="reject" @click="pasoTrabajo=3">Retroceder</button><button class="flex-btn primary" :disabled="procesando||!formInforme.informe_trabajo.trim()" @click="registrarInforme">{{ procesando ? 'Enviando...' : 'Enviar informe al Jefe de Mantenimiento' }}</button></div></div></div></div>
+              <div class="wf-step" :class="{active:pasoTrabajo===4,locked:pasoTrabajo<4}"><div class="step-num">4</div><div class="step-content"><h4>Elaborar informe al Jefe de Mantenimiento</h4><p v-if="pasoTrabajo===4">Redacte el informe con el resumen del trabajo, las pruebas y el resultado. Al enviarlo, el Jefe de Mantenimiento recibirá el caso.</p><div v-if="pasoTrabajo===4" class="step-form"><label class="campo">Informe al Jefe de Mantenimiento<textarea v-model="formInforme.informe_trabajo" rows="6" placeholder="Describa el trabajo realizado, componentes utilizados, pruebas efectuadas y resultado final."></textarea></label><label class="campo">Informe técnico con cuadros / fotografía del trabajo<ArchivoInput type="file" accept="application/pdf,image/*" @change="onFotografia" /></label><div class="step-actions"><button class="reject" @click="pasoTrabajo=3">Retroceder</button><button class="flex-btn primary" :disabled="procesando||!formInforme.informe_trabajo.trim()" @click="registrarInforme">{{ procesando ? 'Enviando...' : 'Enviar informe al Jefe de Mantenimiento' }}</button></div></div></div></div>
             </div></div>
           </div>
         </div>
@@ -215,6 +214,10 @@
 </template>
 
 <script setup>
+import NotificacionesView from './NotificacionesView.vue'
+import CotizacionesRequerimiento from '../components/CotizacionesRequerimiento.vue'
+const cotizacionesFormulario = ref(null)
+
 import ActasRecepcionTecnico from '../components/ActasRecepcionTecnico.vue'
 import { solicitarFirma } from '../utils/firma'
 import TablaTecnicoMantenimiento from '../components/TablaTecnicoMantenimiento.vue'
@@ -224,11 +227,12 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import IconoSigta from '../components/IconoSigta.vue'
 import ExpedienteSolicitudModal from '../components/ExpedienteSolicitudModal.vue'
 import LogoutModal from '../components/LogoutModal.vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 const usuario = ref(JSON.parse(localStorage.getItem('sigta_usuario') || '{}'))
-const vista = ref('ordenes')
+const vista = ref(route.query.vista === 'historial' ? 'historial' : 'ordenes')
 const menuAbierto = ref(false)
 const items = ref([])
 const cargando = ref(false)
@@ -303,10 +307,12 @@ const menu = computed(() => [
   { id: 'cotizaciones', icono: 'compras', nombre: 'Cotizaciones y requerimientos', total: porCotizar.value.length, color: '#C79A1E' },
   { id: 'informes', icono: 'validar', nombre: 'Pruebas e informes', total: porProbar.value.length, color: '#2FA85C' },
   { id: 'compras', icono: 'compras', nombre: 'En espera de compra', total: enEsperaCompra.value.length, color: '#7B6FD9' },
+  { id: 'notificaciones', icono: 'notificaciones', nombre: 'Notificaciones', color: '#123A6B' },
   { id: 'historial', icono: 'historial', nombre: 'Historial', color: '#D9538A' },
 ])
 
 const titulo = computed(() => ({
+  notificaciones: 'Notificaciones',
   resumen: 'Panel del Técnico de Mantenimiento',
   ordenes: ordenAbierta.value ? 'Inspección técnica y diagnóstico' : 'Bandeja de órdenes de trabajo',
   recepcion: 'Recibir componente y acta',
@@ -442,6 +448,9 @@ function irA(id) {
 }
 
 function verItem(item) { detalle.value = item }
+watch(() => route.query.requerimiento, id => {
+  if (id) { vista.value='historial'; detalle.value=items.value.find(r=>String(r.id)===String(id)) || null }
+})
 
 const mostrarLogout = ref(false)
 
@@ -459,8 +468,8 @@ function confirmarSalida() {
 /* ---------- Diagnóstico y requerimiento ---------- */
 const formDiagnostico = reactive({ diagnostico: '', plan_solucion: '', requiere_compra: false })
 const formComponente = reactive({
-  producto_requerido: '', especificacion_producto: '',
-  cantidad_requerida: 1, costo_estimado: '', archivo: null, informe: null,
+  via_compra: 'CAJA_CHICA', producto_requerido: '', especificacion_producto: '',
+  cantidad_requerida: 1, costo_estimado: '', archivos: [], informe: null,
 })
 const formTrabajo = reactive({ trabajo_realizado: '', observaciones_trabajo: '' })
 const formPruebas = reactive({ resultado_pruebas: '' })
@@ -496,11 +505,12 @@ function recibirOrden(item) {
   formDiagnostico.diagnostico = item.diagnostico || ''
   formDiagnostico.plan_solucion = item.plan_solucion || ''
   formDiagnostico.requiere_compra = vista.value === 'cotizaciones' || Boolean(item.requiere_reposicion)
+  formComponente.via_compra = item.via_compra || 'CAJA_CHICA'
   formComponente.producto_requerido = item.producto_requerido || ''
   formComponente.especificacion_producto = item.especificacion_producto || ''
   formComponente.cantidad_requerida = item.cantidad_requerida || 1
   formComponente.costo_estimado = item.costo_estimado || ''
-  formComponente.archivo = null
+  formComponente.archivos = []
   formComponente.informe = null
 }
 
@@ -549,22 +559,29 @@ async function guardarDiagnostico() {
   } catch (e) { alert(e.message) }
 }
 
-function onCotizacion(evento) {
-  formComponente.archivo = evento.target.files?.[0] || null
+function adjuntarCotizacionesR02(datos) {
+  cotizacionesFormulario.value?.adjuntar(datos)
 }
 
 async function guardarBorradorCompra() {
   try {
     const fd = new FormData()
     for (const campo of ['producto_requerido','especificacion_producto','cantidad_requerida','costo_estimado']) fd.append(campo, formComponente[campo] ?? '')
-    if (formComponente.archivo) fd.append('cotizacion_archivo', formComponente.archivo)
+    adjuntarCotizacionesR02(fd)
     if (formComponente.informe) fd.append('informe_compra', formComponente.informe)
-    await postAccion(ordenAbierta.value, 'guardar-borrador-requerimiento', fd, true)
+    const d = await postAccion(ordenAbierta.value, 'guardar-borrador-requerimiento', fd, true)
+    if(d.requerimiento) ordenAbierta.value=d.requerimiento
+    cotizacionesFormulario.value?.limpiar()
     alert('Borrador guardado. Puede continuar después desde Cotizaciones y requerimientos.')
   } catch(e) { alert(e.message) }
 }
 
 async function enviarRequerimiento() {
+  if (!formComponente.costo_estimado || !Number.isFinite(Number(formComponente.costo_estimado)) || Number(formComponente.costo_estimado) < 0) {
+    alert('Ingrese un costo estimado válido antes de enviar el requerimiento.')
+    return
+  }
+  if (!(await cotizacionesFormulario.value?.validar())) return
   procesando.value = true
   try {
     const token = localStorage.getItem('sigta_token');
@@ -595,7 +612,7 @@ async function enviarRequerimiento() {
     datos.append('especificacion_producto', formComponente.especificacion_producto.trim())
     datos.append('cantidad_requerida', String(formComponente.cantidad_requerida || 1))
     if (formComponente.costo_estimado) datos.append('costo_estimado', formComponente.costo_estimado)
-    if (formComponente.archivo) datos.append('cotizacion_archivo', formComponente.archivo)
+    adjuntarCotizacionesR02(datos)
     if (formComponente.informe) datos.append('informe_compra', formComponente.informe)
     
     await postAccion(ordenAbierta.value, 'solicitar-requerimiento', datos, true)
@@ -877,6 +894,7 @@ textarea { width: 100%; border: 1px solid var(--sigta-borde); border-radius: 6px
 .detalle-evidencia-btn:hover{background:var(--sigta-azul-oscuro,var(--sigta-azul-medio))}
 
 @media(max-width:1050px){.stats{grid-template-columns:1fr 1fr}.panels{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}}@media(max-width:760px){aside{position:static;width:100%}main{margin:0;padding:20px}.stats,.cards,.process-grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column;gap:12px}.detalle-fila{grid-template-columns:1fr}.gestion-filtros.standalone{flex-direction:column;align-items:stretch}.gestion-filtros.standalone .g-buscar{max-width:none}}
+.cotizaciones-r02{grid-column:1/-1;background:#f7faff;border:1px solid #d7e3f2;border-radius:9px;padding:14px}.cotizaciones-r02 p{margin:7px 0;font-size:12px}.lista-cotizaciones-r02{list-style:none;padding:0;margin:7px 0}.lista-cotizaciones-r02 li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid #d7e3f2;overflow-wrap:anywhere}.lista-cotizaciones-r02 button{border:1px solid #b8cde1;border-radius:6px;padding:5px 10px;cursor:pointer;background:white;color:#123a6b}.aviso-cotizaciones-r02{color:#a15b09;font-weight:700}
 </style>
 
 <style scoped>

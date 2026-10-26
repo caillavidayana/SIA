@@ -20,6 +20,7 @@
       
         <UsuarioHeader @actualizar="cargar" />
       </header>
+      <CajaChicaPanel resumen />
 
 <p v-if="errorCarga" class="alm-error" role="alert">{{ errorCarga }}</p>
 <section v-if="vista==='resumen'">        <div class="stats">
@@ -54,6 +55,8 @@
 <ModalSia v-if="visor" :titulo="visor.nombre" amplio @cerrar="cerrarVisor"><p v-if="visor.cargando" role="status">Abriendo documento…</p><p v-if="visor.error" class="alm-error" role="alert">{{ visor.error }}</p><template v-if="visor.url"><iframe v-if="visor.tipo==='application/pdf'" :src="visor.url" :title="visor.nombre" class="alm-pdf"></iframe><img v-else-if="visor.tipo.startsWith('image/')" :src="visor.url" :alt="visor.nombre" class="alm-imagen"><p v-else>Descargue el archivo para abrirlo con su aplicación correspondiente.</p><a :href="visor.url" :download="visor.archivo" class="sia-secondary">Descargar documento</a></template></ModalSia>
 </div></template>
 <script setup>
+import CajaChicaPanel from '../components/CajaChicaPanel.vue'
+import { mostrarErrorRegla } from '../utils/errorRegla'
 import AlmacenTabla from '../components/AlmacenTabla.vue'
 import ActaEntregaAlmacen from '../components/ActaEntregaAlmacen.vue'
 import ModalSia from '../components/ModalSia.vue'
@@ -174,6 +177,7 @@ async function cargar() {
   try {
     const r = await fetch('/api/compras/solicitudes/', { headers: { Authorization: `Token ${token()}` } })
     const d = await r.json()
+    if (!r.ok) await mostrarErrorRegla(d)
     if (!r.ok) throw new Error(d.detalle || 'No se pudieron cargar los expedientes.')
     expedientes.value = Array.isArray(d) ? d : (d.results || [])
     if (activo.value) activo.value = expedientes.value.find(e => e.id === activo.value.id) || null
@@ -278,6 +282,7 @@ async function accion(endpoint, cuerpo, esFormData = false, mensajeExito = 'Regi
       body: esFormData ? cuerpo : JSON.stringify(cuerpo),
     })
     const d = await r.json().catch(() => ({}))
+    if (!r.ok) await mostrarErrorRegla(d)
     if (!r.ok) throw new Error(d.detalle || Object.values(d)[0] || 'No fue posible completar la acción.')
     await cargar()
     if (mantenerAbierto) pasoActual.value = 2

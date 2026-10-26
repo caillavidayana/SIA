@@ -35,6 +35,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("mantenimiento", "0005_estados_bpmn"),
+        # La migración de datos consulta este modelo y su relación de origen.
+        ("compras", "0003_solicitudcompra_componente_verificado_and_more"),
     ]
 
     operations = [

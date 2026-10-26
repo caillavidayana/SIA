@@ -1893,11 +1893,15 @@ def usuarios_por_rol(request):
         .order_by("nombre_completo")
     )
 
+    from soporte.carga_tecnica import carga_activa
+    from django.conf import settings
     return Response([
         {
             "id": usuario.id,
             "nombre_completo": usuario.nombre_completo,
             "email": usuario.email,
+            'carga_activa': carga_activa(usuario.pk),
+            'limite_tickets': settings.SIA_MAX_TICKETS_TECNICO,
         }
         for usuario in usuarios
     ])

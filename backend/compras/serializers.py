@@ -79,11 +79,25 @@ class SolicitudCompraSerializer(serializers.ModelSerializer):
         read_only=True
     )
 
+    puede_aprobar = serializers.SerializerMethodField()
+
+    def get_puede_aprobar(self, obj):
+        from .aprobacion import puede_aprobar_final
+        request=self.context.get('request')
+        return puede_aprobar_final(obj,request.user if request else None)
+
+    cotizaciones = serializers.SerializerMethodField()
+
+    def get_cotizaciones(self, obj):
+        from .cotizaciones import CotizacionCompraSerializer
+        return CotizacionCompraSerializer(obj.cotizaciones.all(), many=True, context=self.context).data
+
     class Meta:
 
         model = SolicitudCompra
 
         fields = [
+            'cotizaciones', 'puede_aprobar',
             "id",
             "codigo",
             "titulo",
@@ -183,6 +197,11 @@ class SolicitudCompraSerializer(serializers.ModelSerializer):
 
     def get_responsable_actual(self, obj):
 
+        # REQUERIMIENTO 8: expedientes previos también pueden continuar por DAF.
+        from django.conf import settings
+        if obj.estado == 'VERIFICADO_PENDIENTE_AUTORIZACION' and not settings.SIA_REQUIERE_APROBACION_DIRECTOR:
+            return 'DAF'
+
         if obj.estado == "FONDOS_DESEMBOLSADOS":
             return "Compras y Almacén"
 
@@ -190,6 +209,10 @@ class SolicitudCompraSerializer(serializers.ModelSerializer):
 
     def get_situacion(self, obj):
         """Frase corta que explica en qué punto está el trámite."""
+
+        from django.conf import settings
+        if obj.estado == 'VERIFICADO_PENDIENTE_AUTORIZACION' and not settings.SIA_REQUIERE_APROBACION_DIRECTOR:
+            return 'Certificación existente — DAF puede derivar a Tesorería sin Director'
 
         if obj.estado == "FONDOS_DESEMBOLSADOS":
 

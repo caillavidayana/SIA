@@ -1,4 +1,5 @@
 from rest_framework import status
+from django.conf import settings
 
 from usuarios.authentication import (
     ExpiringTokenAuthentication as TokenAuthentication,
@@ -302,7 +303,7 @@ def preferencias_view(request):
                     "CMP",
 
                 "limite_caja_chica":
-                    1500,
+                    settings.SIA_LIMITE_CAJA_CHICA,
 
                 "intentos_login":
                     5,
@@ -375,3 +376,17 @@ def preferencias_view(request):
         },
         status=status.HTTP_200_OK
     )
+# ======================================================
+# INICIO - CONSULTA PUBLICA AUTENTICADA DE CAJA CHICA
+# ======================================================
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def limite_caja_chica_view(request):
+    from config.reglas import configuracion_reglas
+    return Response(configuracion_reglas(), status=status.HTTP_200_OK)
+
+# ======================================================
+# FIN - CONSULTA PUBLICA AUTENTICADA DE CAJA CHICA
+# ======================================================

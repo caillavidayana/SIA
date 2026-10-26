@@ -6,6 +6,27 @@ from django.utils import timezone
 from usuarios.models import Area
 
 
+class FondoMensualCajaChica(models.Model):
+    """R09: fila única por mes para bloquear reservas concurrentes."""
+    mes = models.DateField(unique=True)
+
+
+class MovimientoCajaChica(models.Model):
+    """Una compra se descuenta una sola vez: compromiso o desembolso."""
+    solicitud = models.OneToOneField('compras.SolicitudCompra', on_delete=models.PROTECT, related_name='movimiento_caja_chica')
+    fondo = models.ForeignKey(FondoMensualCajaChica, on_delete=models.PROTECT, related_name='movimientos')
+    monto = models.DecimalField(max_digits=14, decimal_places=2)
+    desembolsado = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    estado = models.CharField(max_length=20, choices=[('COMPROMETIDO', 'Comprometido'), ('DESEMBOLSADO', 'Desembolsado'), ('LIBERADO', 'Liberado')])
+    origen_fecha = models.CharField(max_length=30, default='APROBACION')
+    saldo_despues = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    registrado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(monto__gte=0, desembolsado__gte=0), name='movimiento_caja_importes_no_negativos')]
+
+
 class ActaEntregaAlmacen(models.Model):
     solicitud = models.ForeignKey('compras.SolicitudCompra', on_delete=models.PROTECT, related_name='actas_almacen')
     referencia = models.UUIDField(unique=True, editable=False)
@@ -28,14 +49,19 @@ class ReciboTesoreria(models.Model):
     firmado = models.FileField(upload_to='tesoreria/firmados/%Y/%m/', storage=AlmacenamientoPrivado(), blank=True)
     comprobante = models.FileField(upload_to='tesoreria/comprobantes/%Y/%m/', storage=AlmacenamientoPrivado(), blank=True)
     confirmado_en = models.DateTimeField(null=True, blank=True)
+    constancia_saldo = models.FileField(upload_to='tesoreria/saldos/%Y/%m/', storage=AlmacenamientoPrivado(), blank=True)
 
 
 class CotizacionCompra(models.Model):
-    solicitud = models.ForeignKey('compras.SolicitudCompra', on_delete=models.PROTECT, related_name='cotizaciones')
+    solicitud = models.ForeignKey('compras.SolicitudCompra', on_delete=models.PROTECT, related_name='cotizaciones', null=True, blank=True)
+    ticket_soporte = models.ForeignKey('soporte.Ticket', on_delete=models.PROTECT, related_name='cotizaciones_r02', null=True, blank=True)
+    cotizacion_mantenimiento = models.OneToOneField('mantenimiento.CotizacionMantenimiento', on_delete=models.PROTECT, null=True, blank=True, related_name='cotizacion_transferida')
+    empresa = models.CharField(max_length=180, blank=True)
+    proveedor_identificador = models.CharField(max_length=60, blank=True)
     proveedor = models.CharField(max_length=180)
     descripcion = models.TextField()
     cantidad = models.PositiveIntegerField()
-    precio_unitario = models.DecimalField(max_digits=12, decimal_places=2)
+    precio_unitario = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     documento = models.FileField(upload_to='cotizaciones/%Y/%m/', storage=AlmacenamientoPrivado())
     seleccionada = models.BooleanField(default=False)
     creada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
@@ -317,34 +343,13 @@ class SolicitudCompra(models.Model):
 
     #def save(self, *args, **kwargs):
 
-        # Regla EMI utilizada para Caja Chica.
- #       if self.monto_estimado is not None:
-#
- #           if self.monto_estimado <= 1500:
-#                self.via_adquisicion = "CAJA_CHICA"
-
-  #          else:
-         #       self.via_adquisicion = "FINANZAS"
-
-       # super().save(*args, **kwargs)
+    # R01: clasificar una vez; una compra registrada como caja chica no se
+    # convierte silenciosamente a Finanzas para eludir una validación posterior.
     def save(self, *args, **kwargs):
-        from auditoria.models import PreferenciaSistema
-        from decimal import Decimal
-
-        if self.monto_estimado is not None:
-            preferencias = PreferenciaSistema.objects.first()
-
-            limite = (
-                preferencias.limite_caja_chica
-                if preferencias is not None
-                else Decimal("1000.00")
-            )
-
-            if self.monto_estimado <= limite:
-                self.via_adquisicion = "CAJA_CHICA"
-            else:
-                self.via_adquisicion = "FINANZAS"
-
+        if self.via_adquisicion == 'PENDIENTE' and self.monto_estimado is not None:
+            self.via_adquisicion = 'CAJA_CHICA' if self.monto_estimado <= settings.SIA_LIMITE_CAJA_CHICA else 'FINANZAS'
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = set(kwargs['update_fields']) | {'via_adquisicion'}
         super().save(*args, **kwargs)
 
     def __str__(self):

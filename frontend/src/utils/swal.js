@@ -5,7 +5,13 @@ import 'sweetalert2/dist/sweetalert2.min.css'
 // (alert, confirm, prompt), igual a la tarjeta de "guardado".
 const estiloSigtaSwal = document.createElement('style')
 estiloSigtaSwal.textContent = `
+  .sigta-swal-container {
+    z-index: 200000 !important;
+  }
   .sigta-swal-popup {
+    border-top: 5px solid var(--sigta-mostaza) !important;
+    font-family: var(--sigta-fuente) !important;
+    width: min(540px, calc(100vw - 28px)) !important;
     border-radius: 12px !important;
     padding: 30px 22px !important;
     background: var(--sigta-blanco) !important;
@@ -17,6 +23,7 @@ estiloSigtaSwal.textContent = `
     font-weight: 800 !important;
   }
   .sigta-swal-text {
+    line-height: 1.7 !important;
     color: var(--sigta-azul) !important;
     font-size: 15px !important;
     font-weight: 600 !important;
@@ -36,6 +43,10 @@ estiloSigtaSwal.textContent = `
   }
   .sigta-swal-confirm:hover {
     background: var(--sigta-azul-medio) !important;
+  }
+  .sigta-swal-confirm:focus-visible, .sigta-swal-cancel:focus-visible {
+    outline: 3px solid var(--sigta-mostaza) !important;
+    outline-offset: 3px !important;
   }
   .sigta-swal-cancel {
     padding: 10px 12px !important;
@@ -63,6 +74,7 @@ export const SigtaModal = Swal.mixin({
   allowOutsideClick: false,
   buttonsStyling: false,
   customClass: {
+    container: 'sigta-swal-container',
     popup: 'sigta-swal-popup',
     title: 'sigta-swal-title',
     htmlContainer: 'sigta-swal-text',

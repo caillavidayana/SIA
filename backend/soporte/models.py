@@ -71,6 +71,30 @@ class EstadoTicket(models.Model):
 # ==========================================================
 
 class Ticket(models.Model):
+    # R06: conservar cada cierre y el expediente anterior al reabrir.
+    reabierto_en = models.DateTimeField(null=True, blank=True)
+    historial_reaperturas = models.JSONField(default=list, blank=True)
+    # R03 impone prioridad; R04 calcula SLA desde creación o reapertura.
+    def save(self, *args, **kwargs):
+        from config.reglas import prioridad_objeto
+        from config.sla import horas_sla, fecha_limite
+        nueva = self._state.adding
+        anterior = type(self).objects.filter(pk=self.pk).values_list('prioridad', flat=True).first() if not nueva else None
+        self.prioridad = prioridad_objeto(self) or self.prioridad or 'MEDIA'
+        campos = {'prioridad'}
+        if nueva or anterior != self.prioridad or not self.sla_fecha_limite:
+            self.sla_horas = horas_sla(self.prioridad)
+            self.sla_fecha_limite = fecha_limite(self, self.prioridad)
+            campos |= {'sla_horas', 'sla_fecha_limite'}
+        if kwargs.get('update_fields') is not None:
+            kwargs['update_fields'] = set(kwargs['update_fields']) | campos
+        super().save(*args, **kwargs)
+        if nueva:
+            self.sla_fecha_limite = fecha_limite(self, self.prioridad)
+            type(self).objects.filter(pk=self.pk).update(sla_fecha_limite=self.sla_fecha_limite)
+
+    via_compra = models.CharField(max_length=20, choices=[('CAJA_CHICA', 'Caja chica'), ('FINANZAS', 'Finanzas')], default='CAJA_CHICA')
+
 
     # ======================================================
     # OPCIONES
@@ -582,16 +606,6 @@ class Ticket(models.Model):
             ]
         )
 
-        # Prioridad arribapara tickets de Red
-    def save(self, *args, **kwargs):
-        if self.categoria_id:
-            if self.categoria.codigo == "RED":
-                self.prioridad = "ALTA"
-
-                if kwargs.get("update_fields") is not None:
-                    kwargs["update_fields"] = set(kwargs["update_fields"]) | {"prioridad"}
-
-        super().save(*args, **kwargs)
     # ======================================================
     # REPRESENTACIÓN
     # ======================================================
@@ -607,7 +621,8 @@ class Ticket(models.Model):
 class NotificacionSoporte(models.Model):
     TIPOS = [("EXITO", "Aprobación"), ("RECHAZO", "Rechazo"), ("INFO", "Información")]
     destinatario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notificaciones_soporte")
-    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="notificaciones")
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="notificaciones", null=True, blank=True)
+    mantenimiento = models.ForeignKey('mantenimiento.RequerimientoMantenimiento', on_delete=models.CASCADE, related_name='notificaciones', null=True, blank=True)
     tipo = models.CharField(max_length=10, choices=TIPOS, default="INFO")
     titulo = models.CharField(max_length=160)
     mensaje = models.TextField()

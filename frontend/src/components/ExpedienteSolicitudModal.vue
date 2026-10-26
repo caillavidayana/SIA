@@ -16,6 +16,7 @@
             <div><dt>Ubicación</dt><dd>{{ registro.ubicacion || 'Sin especificar' }}</dd></div>
             <div><dt>Referencia</dt><dd>{{ registro.referencia_ubicacion || 'Sin referencia' }}</dd></div>
             <div><dt>Equipo</dt><dd>{{ registro.equipo_afectado || 'Sin especificar' }}</dd></div>
+            <div v-if="registro.sla_fecha_limite"><dt>Fecha límite de atención</dt><dd>{{ new Date(registro.sla_fecha_limite).toLocaleString('es-BO',{timeZone:'America/La_Paz'}) }} · {{ registro.sla_estado==='VENCIDO'?'Vencido':registro.sla_horas+' horas' }}</dd></div>
           </dl>
           <div class="expediente-descripcion"><b>Descripción / requerimiento</b><p>{{ registro.descripcion || 'Sin descripción' }}</p></div>
           <div v-if="registro.evidencia_archivo_url" class="expediente-evidencia">
@@ -24,6 +25,7 @@
             <button type="button" @click="$emit('evidencia', registro.evidencia_archivo_url)">Ver evidencia</button>
           </div>
         </section>
+        <details v-for="(ciclo,i) in registro.historial_reaperturas || []" :key="i" class="expediente-descripcion"><summary>Ciclo anterior · cierre {{ new Date(ciclo.cerrado_en).toLocaleString('es-BO') }}</summary><p>{{ ciclo.textos?.solucion }}</p><p>{{ ciclo.textos?.informe_final }}</p><button v-for="(ruta,campo) in ciclo.archivos" :key="campo" type="button" @click="$emit('evidencia','/media/'+ruta)">Ver {{ campo.replaceAll('_',' ') }}</button></details>
         <slot />
       </div>
     </section>

@@ -57,6 +57,7 @@
       
         <UsuarioHeader @actualizar="cargarCompras" />
       </header>
+      <CajaChicaPanel resumen />
 
 
       <!-- =================================================
@@ -598,6 +599,8 @@
 
 
 <script setup>
+import CajaChicaPanel from '../components/CajaChicaPanel.vue'
+import { mostrarErrorRegla } from '../utils/errorRegla'
 import DocumentosExpediente from '../components/DocumentosExpediente.vue'
 import CotizacionesCompra from '../components/CotizacionesCompra.vue'
 import UsuarioHeader from '../components/UsuarioHeader.vue'
@@ -977,8 +980,6 @@ async function abrirSolicitante(
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1032,14 +1033,8 @@ function cerrarSolicitante() {
 // disponible en cualquier estado "en espera".
 // ==========================================================
 
-function puedeAprobar(
-  compra
-) {
-
-  return (
-    bucketEstado(compra?.estado)
-    === 'EN_ESPERA'
-  )
+function puedeAprobar(compra) {
+  return compra?.puede_aprobar === true
 }
 
 
@@ -1183,8 +1178,6 @@ async function ejecutarAccion(
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1193,6 +1186,7 @@ async function ejecutarAccion(
     }
 
     if (!respuesta.ok) {
+      await mostrarErrorRegla(datos)
 
       errorAccion.value =
         datos.detalle
@@ -1324,8 +1318,6 @@ async function cargarCompras() {
 
     if (
       respuesta.status === 401
-      ||
-      respuesta.status === 403
     ) {
 
       cerrarSesion()
@@ -1335,6 +1327,7 @@ async function cargarCompras() {
 
 
     if (!respuesta.ok) {
+      await mostrarErrorRegla(datos)
 
       console.error(
         'Compras:',

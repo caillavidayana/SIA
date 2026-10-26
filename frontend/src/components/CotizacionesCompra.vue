@@ -10,7 +10,7 @@
       <label class="sia-field">Descripción<textarea v-model="form.descripcion" /></label>
       <label class="sia-field">Cantidad<input v-model="form.cantidad" type="number" min="1" step="1"></label>
       <label class="sia-field">Precio unitario (Bs)<input v-model="form.precio_unitario" type="number" min="0.01" step="0.01"></label>
-      <label class="sia-field">Documento<input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" @change="archivo=$event.target.files?.[0] || null"></label>
+      <label class="sia-field">Documento<ArchivoInput type="file" accept="application/pdf,image/png,image/jpeg,image/webp" @change="archivo=$event.target.files?.[0] || null" /></label>
       <button class="sia-primary" :disabled="ocupado || !archivo || !form.proveedor.trim() || !form.descripcion.trim() || !form.precio_unitario" @click="guardar">Guardar cotización</button>
     </details>
   </section>

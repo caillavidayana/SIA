@@ -178,13 +178,12 @@
               </button>
             </div>
 
-            <input
+            <ArchivoInput
               ref="inputArchivo"
               type="file"
               accept="image/jpeg,image/png"
               class="input-oculto"
-              @change="seleccionarArchivo"
-            />
+              @change="seleccionarArchivo" />
 
           </div>
 

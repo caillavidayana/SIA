@@ -1,3 +1,4 @@
+from django.conf import settings
 from usuarios.documentos import documentar, documentos_expediente, pdf_documento
 from rest_framework import (
     status,
@@ -80,6 +81,8 @@ def tiene_permiso(usuario, codigo_permiso):
 
 
 def liberar_origen(solicitud, motivo, request):
+    from .caja_chica import liberar
+    liberar(solicitud)
     """Un expediente rechazado deja sin efecto la compra, pero el ticket o
     el requerimiento que lo originó seguía esperando el componente. Aquí se
     les devuelve el control: quedan marcados como NO_VIABLE y vuelven a la
@@ -100,6 +103,8 @@ def liberar_origen(solicitud, motivo, request):
             ticket.estado = estado
 
         ticket.save()
+        from config.reglas import notificar_rechazo
+        notificar_rechazo(ticket, motivo)
 
         registrar_bitacora(
             request=request,
@@ -129,6 +134,8 @@ def liberar_origen(solicitud, motivo, request):
             requerimiento.estado = estado
 
         requerimiento.save()
+        from config.reglas import notificar_rechazo
+        notificar_rechazo(requerimiento, motivo)
 
         registrar_bitacora(
             request=request,
@@ -175,7 +182,7 @@ class SolicitudCompraViewSet(
         from .tesoreria import recibos
         return recibos(self, request)
 
-    @action(detail=True, methods=['get'], url_path=r'recibos-tesoreria/(?P<recibo_id>[0-9]+)/(?P<clase>original|firmado|comprobante)')
+    @action(detail=True, methods=['get'], url_path=r'recibos-tesoreria/(?P<recibo_id>[0-9]+)/(?P<clase>original|firmado|comprobante|constancia_saldo)')
     def archivo_recibo_tesoreria(self, request, pk=None, recibo_id=None, clase=None):
         from .tesoreria import archivo_recibo
         return archivo_recibo(self, request, recibo_id, clase)
@@ -268,6 +275,7 @@ class SolicitudCompraViewSet(
                 "solicitante",
                 "area"
             )
+            .prefetch_related('cotizaciones')
             .order_by(
                 "-creado_en"
             )
@@ -562,21 +570,51 @@ class SolicitudCompraViewSet(
             status=status.HTTP_200_OK
         )
 
+    def _validar_aprobacion_r01_r02(self, request, solicitud):
+        from .aprobacion import validar_aprobador
+        validar_aprobador(solicitud, request.user)
+        from config.reglas import error_limite, notificar_rechazo
+        from .reglas_cotizaciones import validar_solicitud
+        error = error_limite(solicitud.monto_estimado, solicitud.via_adquisicion)
+        if error:
+            solicitud.estado, solicitud.activo = 'RECHAZADO', False
+            solicitud.motivo_rechazo = error['detalle']
+            solicitud.save()
+            liberar_origen(solicitud, error['detalle'], request)
+            registrar_bitacora(request=request, accion='R01_COMPRA_RECHAZADA', modulo='Compras', detalle=f'{solicitud.codigo}: {error["detalle"]}', nivel='WARNING')
+            return Response(error, status=400)
+        validar_solicitud(solicitud)
+        return None
+
+    @transaction.atomic
     def _transicion(self, request, solicitud, permiso, origen, destino, accion, detalle):
+        solicitud = SolicitudCompra.objects.select_for_update().get(pk=solicitud.pk)
         if not tiene_permiso(request.user, permiso):
             return respuesta_sin_permiso(permiso)
         if solicitud.cerrado_inmutable:
             return Response({"detalle": "El expediente está cerrado y es inmutable."}, status=status.HTTP_409_CONFLICT)
         if solicitud.estado not in origen:
             return Response({"detalle": f"Transición no permitida desde {solicitud.estado}."}, status=status.HTTP_409_CONFLICT)
+        if destino == 'APROBADO_PARA_DESEMBOLSO':
+            from .aprobacion import validar_aprobador
+            validar_aprobador(solicitud, request.user, final=settings.SIA_REQUIERE_APROBACION_DIRECTOR)
+        if destino in {'EVALUADO_PENDIENTE_CERTIFICACION', 'VERIFICADO_PENDIENTE_AUTORIZACION', 'APROBADO_PARA_DESEMBOLSO'}:
+            bloqueo = self._validar_aprobacion_r01_r02(request, solicitud)
+            if bloqueo is not None:
+                return bloqueo
+        if destino == 'APROBADO_PARA_DESEMBOLSO':
+            from .caja_chica import registrar_operacion
+            registrar_operacion(solicitud)
         solicitud.estado = destino
         solicitud.save()
         registrar_bitacora(request=request, accion=accion, modulo="Compras", detalle=f"{solicitud.codigo}: {detalle}", nivel="INFO")
         return Response(self.get_serializer(solicitud).data)
 
     @action(detail=True, methods=["post"], url_path="evaluar-daf")
+    @transaction.atomic
     def evaluar_daf(self, request, pk=None):
         solicitud = self.get_object()
+        solicitud = SolicitudCompra.objects.select_for_update().get(pk=solicitud.pk)
         if not tiene_permiso(request.user, "EVALUAR_EXPEDIENTE"):
             return respuesta_sin_permiso("EVALUAR_EXPEDIENTE")
         if solicitud.estado != "CREADO_PENDIENTE_DAF":
@@ -590,6 +628,16 @@ class SolicitudCompraViewSet(
             solicitud.save()
             liberar_origen(solicitud, motivo, request)
             return Response(self.get_serializer(solicitud).data)
+        from .aprobacion import validar_aprobador
+        validar_aprobador(solicitud, request.user)
+        via = request.data.get('via_adquisicion', solicitud.via_adquisicion if solicitud.via_adquisicion != 'PENDIENTE' else 'CAJA_CHICA')
+        if via not in ('CAJA_CHICA', 'FINANZAS'):
+            return Response({'detalle': 'Seleccione Caja chica o Finanzas.'}, status=400)
+        solicitud.via_adquisicion = via
+        solicitud.save(update_fields=['via_adquisicion', 'actualizado_en'])
+        bloqueo = self._validar_aprobacion_r01_r02(request, solicitud)
+        if bloqueo is not None:
+            return bloqueo
         from .expediente import documentos_faltantes
         faltantes = documentos_faltantes(solicitud)
         if faltantes:
@@ -597,13 +645,20 @@ class SolicitudCompraViewSet(
         return self._transicion(request, solicitud, "EVALUAR_EXPEDIENTE", ["CREADO_PENDIENTE_DAF"], "EVALUADO_PENDIENTE_CERTIFICACION", "EVALUAR_PRESUPUESTO", "La solicitud califica presupuestariamente.")
 
     @action(detail=True, methods=["post"], url_path="certificar-daf")
+    @transaction.atomic
     def certificar_daf(self, request, pk=None):
         solicitud = self.get_object()
         if not tiene_permiso(request.user, "CERTIFICAR_PRESUPUESTO"):
             return respuesta_sin_permiso("CERTIFICAR_PRESUPUESTO")
-        if solicitud.estado != "EVALUADO_PENDIENTE_CERTIFICACION":
+        # REQUERIMIENTO 8 (R08): DAF conserva su permiso y certificación.
+        estados_certificables = ['EVALUADO_PENDIENTE_CERTIFICACION']
+        if not settings.SIA_REQUIERE_APROBACION_DIRECTOR:
+            estados_certificables.append('VERIFICADO_PENDIENTE_AUTORIZACION')
+        if solicitud.estado not in estados_certificables:
             return Response({"detalle": "El expediente no está pendiente de certificación."}, status=409)
         archivo = request.FILES.get("certificacion_presupuestaria")
+        if not archivo and solicitud.estado == 'VERIFICADO_PENDIENTE_AUTORIZACION':
+            archivo = solicitud.certificacion_presupuestaria
         if not archivo:
             return Response({"detalle": "Debe adjuntar la certificación presupuestaria PDF."}, status=400)
         if not archivo.name.lower().endswith(".pdf"):
@@ -611,6 +666,9 @@ class SolicitudCompraViewSet(
         # BPMN: "verificar requisitos" es tarea de la DAF (informe, proforma
         # y POA). Antes lo comprobaba Tesorería en un paso posterior que el
         # proceso no contempla, así que el control se ejerce aquí.
+        bloqueo = self._validar_aprobacion_r01_r02(request, solicitud)
+        if bloqueo is not None:
+            return bloqueo
         from .expediente import documentos_faltantes
         faltantes = documentos_faltantes(solicitud)
         if faltantes:
@@ -619,13 +677,58 @@ class SolicitudCompraViewSet(
         solicitud.save(update_fields=["certificacion_presupuestaria", "actualizado_en"])
         # Emitida la certificación, el expediente queda disponible para la
         # autorización del Director (BPMN: DAF -> DIRECTOR, sin escalas).
-        return self._transicion(request, solicitud, "CERTIFICAR_PRESUPUESTO", ["EVALUADO_PENDIENTE_CERTIFICACION"], "VERIFICADO_PENDIENTE_AUTORIZACION", "CERTIFICAR_PRESUPUESTO", "Certificación emitida; expediente derivado al Director para autorizar la compra.")
+        # REQUERIMIENTO 8 (R08): sin Director, Tesorería recibe el expediente.
+        # REQUERIMIENTO 9 (R09): _transicion reserva saldo de forma atómica.
+        destino = 'VERIFICADO_PENDIENTE_AUTORIZACION' if settings.SIA_REQUIERE_APROBACION_DIRECTOR else 'APROBADO_PARA_DESEMBOLSO'
+        return self._transicion(request, solicitud, "CERTIFICAR_PRESUPUESTO", estados_certificables, destino, "CERTIFICAR_PRESUPUESTO", "Certificación emitida; expediente derivado a " + ('Dirección.' if settings.SIA_REQUIERE_APROBACION_DIRECTOR else 'Tesorería sin aprobación del Director.'))
 
-    @action(detail=True, methods=["post"], url_path="visto-bueno-director")
-    def visto_bueno_director(self, request, pk=None):
+  #  @action(detail=True, methods=["post"], url_path="visto-bueno-director")
+   # def visto_bueno_director(self, request, pk=None):
         # Igual que certificar-daf: al dar el visto bueno, el expediente
         # queda automáticamente disponible para Tesorería (desembolso).
-        return self._transicion(request, self.get_object(), "DAR_VISTO_BUENO", ["VERIFICADO_PENDIENTE_AUTORIZACION"], "APROBADO_PARA_DESEMBOLSO", "VISTO_BUENO_DIRECTOR", "Director autorizó; expediente derivado automáticamente a Tesorería para desembolso.")
+      #  return self._transicion(request, self.get_object(), "DAR_VISTO_BUENO", ["VERIFICADO_PENDIENTE_AUTORIZACION"], "APROBADO_PARA_DESEMBOLSO", "VISTO_BUENO_DIRECTOR", "Director autorizó; expediente derivado automáticamente a Tesorería para desembolso.")
+    @action(detail=True, methods=["post"], url_path="visto-bueno-director")
+    def visto_bueno_director(self, request, pk=None):
+        if not tiene_permiso(request.user, 'DAR_VISTO_BUENO'):
+            return respuesta_sin_permiso('DAR_VISTO_BUENO')
+        # REQUERIMIENTO 8: este paso no pertenece al flujo vigente.
+        if not settings.SIA_REQUIERE_APROBACION_DIRECTOR:
+            return Response({'detalle': 'La aprobación del Director está desactivada. DAF deriva directamente a Tesorería.'}, status=409)
+
+
+        # ======================================================
+        # INICIO R08 - PROHIBIR AUTOAPROBACION DE COMPRAS
+        # ======================================================
+
+        solicitud = self.get_object()
+
+        # Verificar que el solicitante no apruebe su propia compra
+        if solicitud.solicitante_id == request.user.pk:
+            return Response(
+                {
+                    "detalle": (
+                        "No puede aprobar una solicitud "
+                        "de compra creada por usted mismo."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # ======================================================
+        # FIN R08 - PROHIBIR AUTOAPROBACION DE COMPRAS
+        # ======================================================
+
+        # Mantener el flujo original de aprobacion
+        return self._transicion(
+            request,
+            solicitud,
+            "DAR_VISTO_BUENO",
+            ["VERIFICADO_PENDIENTE_AUTORIZACION"],
+            "APROBADO_PARA_DESEMBOLSO",
+            "VISTO_BUENO_DIRECTOR",
+            "Director autorizo; expediente derivado "
+            "automaticamente a Tesoreria para desembolso."
+        )
 
     @action(detail=True, methods=["post"], url_path="rechazar")
     def rechazar(self, request, pk=None):

@@ -1,3 +1,4 @@
+from config.testing import cerrar_respuesta
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from rest_framework.test import APITestCase
@@ -125,11 +126,11 @@ class FlujoMantenimientoTests(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, 200, r.data)
-        self.assertEqual(r.data['requerimiento']['sla_horas'], 8)
+        self.assertEqual(r.data['requerimiento']['sla_horas'], 4)
         from datetime import datetime, timedelta
-        clasificado = datetime.fromisoformat(r.data['requerimiento']['clasificado_en'].replace('Z', '+00:00'))
+        clasificado = datetime.fromisoformat(r.data['requerimiento']['creado_en'].replace('Z', '+00:00'))
         limite = datetime.fromisoformat(r.data['requerimiento']['sla_fecha_limite'].replace('Z', '+00:00'))
-        self.assertEqual(limite - clasificado, timedelta(hours=8))
+        self.assertEqual(limite - clasificado, timedelta(hours=4))
 
         r = self.client.post(
             f"/api/mantenimiento/requerimientos/{pk}/designar-revision/",
@@ -255,11 +256,15 @@ class FlujoMantenimientoTests(APITestCase):
             f"/api/mantenimiento/requerimientos/{pk}/solicitar-requerimiento/",
             {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
                 "producto_requerido": "Compresor 12000 BTU",
                 "especificacion_producto": "Marca X",
                 "cantidad_requerida": 1,
-                "costo_estimado": "4500",
+                "costo_estimado": "900",
+                "via_compra": "FINANZAS",
+                "cotizaciones": [SimpleUploadedFile("cotizacion2.pdf", b"dos"), SimpleUploadedFile("cotizacion3.pdf", b"tres")],
+                "cotizaciones_metadata": '[{"proveedor":"Proveedor dos"},{"proveedor":"Proveedor tres"},{"proveedor":"Proveedor de prueba"}]',
             },
             format="multipart",
         )
@@ -281,9 +286,9 @@ class FlujoMantenimientoTests(APITestCase):
         proforma = self.client.get(detalle.data["cotizacion_archivo"])
         self.assertEqual(proforma.status_code, 200, getattr(proforma, "data", None))
         try:
-            self.assertEqual(b"".join(proforma.streaming_content), b"cotizacion")
+            self.assertEqual(b"".join(proforma.streaming_content), b"dos")
         finally:
-            proforma.close()
+            cerrar_respuesta(proforma)
         r = self.client.post(
             f"/api/mantenimiento/requerimientos/{pk}/evaluar-viabilidad-compra/",
             {"viable": False, "motivo_no_viable": "Excede el presupuesto disponible."},
@@ -321,12 +326,14 @@ class FlujoMantenimientoTests(APITestCase):
         guardado = RequerimientoMantenimiento.objects.get(pk=pk)
         self.assertFalse(guardado.estado_compra_componente)
         self.assertEqual(guardado.especificacion_producto, "Cuadro técnico")
-        self.assertEqual(guardado.informe_compra.read(), b"cuadros")
+        with guardado.informe_compra.open("rb") as archivo:
+            self.assertEqual(archivo.read(), b"cuadros")
         self.assertFalse(SolicitudCompra.objects.filter(requerimiento_mantenimiento_id=pk).exists())
         self.client.post(
             f"/api/mantenimiento/requerimientos/{pk}/solicitar-requerimiento/",
             {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),"producto_requerido": "Ventilador", "cantidad_requerida": 1, "costo_estimado": "300"},
             format="multipart",
         )
@@ -335,7 +342,10 @@ class FlujoMantenimientoTests(APITestCase):
         RequerimientoMantenimiento.objects.filter(pk=pk).update(informe_compra="")
         r = self.client.get(url + "/informe-requerimiento-pdf/")
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF-"))
+        try:
+            self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF-"))
+        finally:
+            cerrar_respuesta(r)
         self.assertTrue(RequerimientoMantenimiento.objects.get(pk=pk).informe_compra)
         r = self.client.post(url + "/validar-viabilidad-compra/", {}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
@@ -367,8 +377,10 @@ class FlujoMantenimientoTests(APITestCase):
         self.assertEqual(solicitud.origen_modulo, "MANTENIMIENTO")
         self.assertEqual(solicitud.requerimiento_mantenimiento_id, pk)
         self.assertEqual(solicitud.estado, "CREADO_PENDIENTE_DAF")
-        self.assertEqual(solicitud.informe.read(5), b"%PDF-")
-        self.assertEqual(solicitud.proforma.read(), b"cotizacion")
+        with solicitud.informe.open("rb") as archivo:
+            self.assertEqual(archivo.read(5), b"%PDF-")
+        with solicitud.proforma.open("rb") as archivo:
+            self.assertEqual(archivo.read(), b"cotizacion")
         self.assertTrue(solicitud.poa)
         self.assertTrue(solicitud.pedido)
 

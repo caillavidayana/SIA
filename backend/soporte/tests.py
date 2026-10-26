@@ -1,3 +1,4 @@
+from config.testing import cerrar_respuesta
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from django.core.management import call_command
@@ -94,6 +95,7 @@ class FlujoSoporteCompraTests(APITestCase):
         self.autenticar("ESPECIALISTA")
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
             "componente_requerido": "Fuente de monitor",
             "especificaciones_tecnicas": "Fuente 19V 2A",
@@ -117,7 +119,10 @@ class FlujoSoporteCompraTests(APITestCase):
         informe_generado = Ticket.objects.get(pk=pk).informe_compra.name
         r = self.client.get(f"/api/soporte/tickets/{pk}/informe-requerimiento-pdf/")
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF-"))
+        try:
+            self.assertTrue(b"".join(r.streaming_content).startswith(b"%PDF-"))
+        finally:
+            cerrar_respuesta(r)
         self.assertEqual(Ticket.objects.get(pk=pk).informe_compra.name, informe_generado)
         r = self.client.post(f"/api/soporte/tickets/{pk}/validar-viabilidad-compra/", {}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
@@ -147,14 +152,17 @@ class FlujoSoporteCompraTests(APITestCase):
         self.assertTrue(solicitud.proforma)
         self.assertTrue(solicitud.poa)
         self.assertTrue(solicitud.pedido)
-        self.assertEqual(solicitud.informe.read(5), b"%PDF-")
-        self.assertEqual(solicitud.proforma.read(), b"cotizacion")
+        with solicitud.informe.open("rb") as archivo:
+            self.assertEqual(archivo.read(5), b"%PDF-")
+        with solicitud.proforma.open("rb") as archivo:
+            self.assertEqual(archivo.read(), b"cotizacion")
 
         # No se puede duplicar la solicitud de compra para el
         # mismo ticket.
         self.autenticar("ESPECIALISTA")
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
             "componente_requerido": "Otro componente",
         }, format="multipart")
@@ -185,11 +193,15 @@ class FlujoSoporteCompraTests(APITestCase):
         self.autenticar("ESPECIALISTA")
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
             "componente_requerido": "GPU de alta gama",
             "especificaciones_tecnicas": "GPU compatible con el equipo",
             "justificacion_compra": "El equipo no puede operar sin reemplazo.",
-            "costo_estimado": "9999.00",
+            "costo_estimado": "900.00",
+            "via_compra": "FINANZAS",
+            "cotizaciones": [SimpleUploadedFile("cotizacion2.pdf", b"dos"), SimpleUploadedFile("cotizacion3.pdf", b"tres")],
+            "cotizaciones_metadata": '[{"proveedor":"Proveedor dos"},{"proveedor":"Proveedor tres"},{"proveedor":"Proveedor de prueba"}]',
         }, format="multipart")
         self.assertEqual(r.status_code, 200, r.data)
 
@@ -209,6 +221,7 @@ class FlujoSoporteCompraTests(APITestCase):
         self.autenticar("SOLICITANTE")
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
             "componente_requerido": "Teclado nuevo",
         }, format="multipart")
@@ -220,10 +233,12 @@ class FlujoSoporteCompraTests(APITestCase):
         self.autenticar("ESPECIALISTA")
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "informe_compra": SimpleUploadedFile("informe.pdf", b"informe con cuadros"),
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.pdf", b"cotizacion"),
             "componente_requerido": "Mouse nuevo",
             "especificaciones_tecnicas": "Mouse USB",
             "justificacion_compra": "El periférico actual no funciona.",
+            "costo_estimado": "100.00",
         }, format="multipart")
         self.assertEqual(r.status_code, 200, r.data)
 
@@ -258,6 +273,7 @@ class FlujoSoporteCompraTests(APITestCase):
         r = self.client.post(f"/api/soporte/tickets/{pk}/solicitar-requerimiento-componente/", {
             "componente_requerido": "Fuente", "especificaciones_tecnicas": "ATX",
             "justificacion_compra": "Fuente quemada", "costo_estimado": "100.00",
+            "proveedor_cotizacion": "Proveedor de prueba",
             "cotizacion_archivo": SimpleUploadedFile("cotizacion.jpg", b"imagen", content_type="image/jpeg"),
         }, format="multipart")
         self.assertEqual(r.status_code, 200, r.data)
@@ -430,3 +446,112 @@ class FlujoSoporteCompraTests(APITestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.estado.codigo, "EN_EJECUCION")
         self.assertIsNotNone(ticket.inicio_atencion_en)
+
+
+
+# ==========================================================
+# INICIO PRUEBAS R04 Y R05
+# ==========================================================
+
+from datetime import timedelta
+from types import SimpleNamespace
+
+from django.test import SimpleTestCase
+from django.utils import timezone
+
+from .views import calcular_sla_cumplido, validar_estado_ticket
+
+
+class ReglasSLAyEstadosTests(SimpleTestCase):
+    """
+    R04: Verifica el cumplimiento de los plazos SLA.
+    R05: Verifica la función de validación de estados.
+    """
+
+    # ------------------------------------------------------
+    # R04 - SLA
+    # ------------------------------------------------------
+
+    def test_r04_sla_cumplido_antes_del_limite(self):
+        limite = timezone.now()
+
+        ticket = SimpleNamespace(
+            sla_fecha_limite=limite
+        )
+
+        resultado = calcular_sla_cumplido(
+            ticket,
+            limite - timedelta(minutes=30)
+        )
+
+        self.assertTrue(resultado)
+
+    def test_r04_sla_cumplido_exactamente_en_limite(self):
+        limite = timezone.now()
+
+        ticket = SimpleNamespace(
+            sla_fecha_limite=limite
+        )
+
+        resultado = calcular_sla_cumplido(ticket, limite)
+
+        self.assertTrue(resultado)
+
+    def test_r04_sla_incumplido_despues_del_limite(self):
+        limite = timezone.now()
+
+        ticket = SimpleNamespace(
+            sla_fecha_limite=limite
+        )
+
+        resultado = calcular_sla_cumplido(
+            ticket,
+            limite + timedelta(minutes=1)
+        )
+
+        self.assertFalse(resultado)
+
+    def test_r04_ticket_sin_sla(self):
+        ticket = SimpleNamespace(
+            sla_fecha_limite=None
+        )
+
+        resultado = calcular_sla_cumplido(
+            ticket,
+            timezone.now()
+        )
+
+        self.assertIsNone(resultado)
+
+    # ------------------------------------------------------
+    # R05 - VALIDACIÓN DE ESTADOS
+    # ------------------------------------------------------
+
+    def test_r05_estado_permitido(self):
+        ticket = SimpleNamespace(
+            estado=SimpleNamespace(codigo="NUEVO")
+        )
+
+        resultado = validar_estado_ticket(
+            ticket,
+            ["NUEVO"]
+        )
+
+        self.assertTrue(resultado)
+
+    def test_r05_estado_no_permitido(self):
+        ticket = SimpleNamespace(
+            estado=SimpleNamespace(codigo="CERRADO")
+        )
+
+        resultado = validar_estado_ticket(
+            ticket,
+            ["NUEVO"]
+        )
+
+        self.assertFalse(resultado)
+
+
+# ==========================================================
+# FIN PRUEBAS R04 Y R05
+# ==========================================================

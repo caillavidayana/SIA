@@ -8,14 +8,16 @@ class CotizacionCompraSerializer(serializers.ModelSerializer):
     documento_url = serializers.SerializerMethodField()
     class Meta:
         model = CotizacionCompra
-        fields = ['id', 'proveedor', 'descripcion', 'cantidad', 'precio_unitario', 'total', 'documento', 'documento_url', 'seleccionada', 'creado_en']
+        fields = ['id', 'proveedor', 'empresa', 'proveedor_identificador', 'descripcion', 'cantidad', 'precio_unitario', 'total', 'documento', 'documento_url', 'seleccionada', 'creado_en']
         read_only_fields = ['id', 'seleccionada', 'creado_en']
         extra_kwargs = {'documento': {'write_only': True}}
     def get_documento_url(self, obj):
         return f'/api/compras/solicitudes/{obj.solicitud_id}/cotizaciones/{obj.pk}/archivo/'
     def get_total(self, obj):
-        return str(obj.precio_unitario * obj.cantidad)
+        return str(obj.precio_unitario * obj.cantidad) if obj.precio_unitario is not None else None
     def validate_precio_unitario(self, valor):
+        if valor is None:
+            return valor
         if not valor.is_finite() or valor <= Decimal('0'):
             raise serializers.ValidationError('Ingrese un precio positivo.')
         return valor

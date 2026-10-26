@@ -15,8 +15,9 @@
     <main>
       <header class="tes-page-header"><div><h1>{{ titulo }}</h1><p>{{ subtitulo }}</p></div><UsuarioHeader @actualizar="cargar" /></header>
       <p v-if="errorCarga" class="tes-error" role="alert">{{ errorCarga }}</p>
+      <CajaChicaPanel v-if="vista==='resumen'||vista==='caja'" />
       <section v-if="vista === 'resumen'" class="stats">
-        <button @click="irA('desembolso')"><i><IconoSigta nombre="compras" :tamano="20" /></i><div><small>Por desembolsar</small><b>{{ porDesembolsar.length }}</b><p>autorizados por el Director</p></div></button>
+        <button @click="irA('desembolso')"><i><IconoSigta nombre="compras" :tamano="20" /></i><div><small>Por desembolsar</small><b>{{ porDesembolsar.length }}</b><p>certificados por DAF</p></div></button>
         <button @click="irA('historial')"><i><IconoSigta nombre="historial" :tamano="20" /></i><div><small>Desembolsados</small><b>{{ desembolsados.length }}</b><p>entregas registradas</p></div></button>
         <article><i><IconoSigta nombre="etiqueta" :tamano="20" /></i><div><small>Monto desembolsado</small><b>{{ montoTotal }}</b><p>bolivianos en total</p></div></article>
         <article><i><IconoSigta nombre="solicitudes" :tamano="20" /></i><div><small>Expedientes</small><b>{{ expedientes.length }}</b><p>en el sistema</p></div></article>
@@ -34,7 +35,7 @@
         <h3 class="tes-section-head">{{ pasoActual === 1 ? 'Revisión y desembolso' : 'Registro de entrega de fondos' }}</h3>
         <div class="tes-section-body">
           <template v-if="pasoActual === 1">
-            <h4>Revisión de documentos autorizados</h4><p class="tes-help">Revise los documentos remitidos por la DAF y el Director antes de continuar.</p>
+            <h4>Revisión de documentos autorizados</h4><p class="tes-help">Revise los documentos remitidos por la DAF antes de continuar.</p>
             <div v-for="doc in documentos(expedienteActivo)" :key="doc.campo" class="tes-documento"><strong>{{ doc.nombre }}</strong><button v-if="doc.url" class="sia-primary" :disabled="cargandoDocumento" @click="verArchivo(doc.url, doc.nombre)">Ver documento</button><span v-else>No adjunto</span></div>
             <p v-if="recuperandoRecibo" class="tes-help" role="status">Consultando si existe un recibo pendiente de firma…</p>
             <p v-else-if="recibo" class="tes-help">Este expediente ya tiene un recibo generado. Puede continuar para adjuntar su copia firmada.</p>
@@ -56,9 +57,9 @@
             </section>
             <section v-if="recibo" class="tes-recibo">
               <h4>2. Adjuntar el recibo firmado</h4><p class="tes-help">Imprima el recibo, obtenga las firmas de quien entrega y quien recibe, y suba el mismo documento escaneado en PDF.</p>
-              <label class="sia-field">PDF con ambas firmas<input type="file" :disabled="procesando" accept="application/pdf,.pdf" @change="seleccionarArchivo($event, 'firmado')"></label>
+              <label class="sia-field">PDF con ambas firmas<ArchivoInput type="file" :disabled="procesando" accept="application/pdf,.pdf" @change="seleccionarArchivo($event, 'firmado')" /></label>
               <p v-if="firmadoFile" class="tes-help">Seleccionado: {{ firmadoFile.name }}</p>
-              <label v-if="form.tipo_desembolso !== 'Efectivo'" class="sia-field">Comprobante de {{ form.tipo_desembolso }} (obligatorio)<input :key="form.tipo_desembolso" type="file" :disabled="procesando" accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp" @change="seleccionarArchivo($event, 'comprobante')"></label>
+              <label v-if="form.tipo_desembolso !== 'Efectivo'" class="sia-field">Comprobante de {{ form.tipo_desembolso }} (obligatorio)<ArchivoInput :key="form.tipo_desembolso" type="file" :disabled="procesando" accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp" @change="seleccionarArchivo($event, 'comprobante')" /></label>
               <p v-if="comprobanteFile" class="tes-help">Comprobante: {{ comprobanteFile.name }}</p>
               <label class="tes-check"><input v-model="firmasConfirmadas" :disabled="procesando" type="checkbox">Confirmo que el PDF adjunto corresponde a este recibo y contiene las firmas de quien recibe y quien entrega los fondos.</label>
             </section>
@@ -80,6 +81,7 @@
           <div class="tes-documento"><strong>Recibo original generado por el sistema</strong><button class="sia-primary" @click="verArchivo(reciboConfirmado.original_url, 'Recibo original')">Ver PDF</button></div>
           <div class="tes-documento"><strong>Recibo con las firmas de quien recibe y quien entrega</strong><button class="sia-primary" @click="verArchivo(reciboConfirmado.firmado_url, 'Recibo firmado')">Ver PDF firmado</button></div>
           <div v-if="reciboConfirmado.comprobante_url" class="tes-documento"><strong>Comprobante de {{ reciboConfirmado.datos.metodo }}</strong><button class="sia-primary" @click="verArchivo(reciboConfirmado.comprobante_url, 'Comprobante de desembolso')">Ver comprobante</button></div>
+          <div v-if="reciboConfirmado.saldo_confirmado_url" class="tes-documento"><strong>Saldo real después del desembolso</strong><button class="sia-primary" @click="verArchivo(reciboConfirmado.saldo_confirmado_url, 'Constancia de saldo confirmado')">Ver saldo en PDF</button></div>
           <details class="tes-snapshot"><summary>Datos conservados en el recibo original</summary><dl class="tes-auditoria"><div v-for="campo in snapshotCampos" :key="campo[0]"><dt>{{ campo[0] }}</dt><dd>{{ reciboConfirmado.datos[campo[1]] }}</dd></div></dl></details>
         </template>
         <template v-else-if="!cargandoHistorial && !errorHistorial"><p class="tes-help">Este desembolso se registró antes del nuevo recibo firmado. Se muestran los respaldos existentes.</p><div v-if="detalle.comprobante_desembolso" class="tes-documento"><strong>Comprobante de desembolso archivado</strong><button class="sia-primary" @click="verArchivo(detalle.comprobante_desembolso, 'Comprobante archivado')">Ver comprobante</button></div><div v-if="entregaAnterior" class="tes-documento"><strong>Constancia del registro de desembolso</strong><button class="sia-primary" @click="verArchivo(`/api/compras/solicitudes/${detalle.id}/documentos/${entregaAnterior.id}/pdf/`, 'Constancia de desembolso')">Ver PDF</button></div></template>
@@ -96,6 +98,8 @@
 </template>
 
 <script setup>
+import CajaChicaPanel from '../components/CajaChicaPanel.vue'
+import { mostrarErrorRegla } from '../utils/errorRegla'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import UsuarioHeader from '../components/UsuarioHeader.vue'
@@ -123,9 +127,9 @@ const token = () => localStorage.getItem('sigta_token')
 const porDesembolsar = computed(() => expedientes.value.filter(e => e.estado === 'APROBADO_PARA_DESEMBOLSO'))
 const desembolsados = computed(() => expedientes.value.filter(e => Number(e.monto_desembolsado) > 0))
 const montoTotal = computed(() => desembolsados.value.reduce((total, e) => total + Number(e.monto_desembolsado || 0), 0).toLocaleString('es-BO', { minimumFractionDigits: 2 }))
-const menu = computed(() => [{ id: 'resumen', icono: 'inicio', nombre: 'Dashboard', color: '#F2C400' }, { id: 'desembolso', icono: 'compras', nombre: 'Desembolsar dinero', total: porDesembolsar.value.length, color: '#C79A1E' }, { id: 'historial', icono: 'historial', nombre: 'Historial', total: desembolsados.value.length, color: '#6B7C93' }])
-const titulo = computed(() => ({ resumen: 'Dashboard de Tesorería', desembolso: 'Desembolsar dinero', historial: 'Historial de desembolsos' })[vista.value])
-const subtitulo = computed(() => ({ resumen: 'Entrega de fondos de Caja Chica para las compras autorizadas.', desembolso: 'Expedientes autorizados por el Director pendientes de entrega de fondos.', historial: 'Datos de entrega, recibos firmados y comprobantes para auditoría.' })[vista.value])
+const menu = computed(() => [{ id: 'resumen', icono: 'inicio', nombre: 'Dashboard', color: '#F2C400' }, { id: 'caja', icono: 'compras', nombre: 'Control de Caja Chica', color: '#123A6B' }, { id: 'desembolso', icono: 'compras', nombre: 'Desembolsar dinero', total: porDesembolsar.value.length, color: '#C79A1E' }, { id: 'historial', icono: 'historial', nombre: 'Historial', total: desembolsados.value.length, color: '#6B7C93' }])
+const titulo = computed(() => ({ caja: 'Control de Caja Chica', resumen: 'Dashboard de Tesorería', desembolso: 'Desembolsar dinero', historial: 'Historial de desembolsos' })[vista.value])
+const subtitulo = computed(() => ({ caja: 'Fondo mensual, compromisos y saldo disponible.', resumen: 'Entrega de fondos de Caja Chica para las compras autorizadas.', desembolso: 'Expedientes certificados por DAF pendientes de entrega de fondos.', historial: 'Datos de entrega, recibos firmados y comprobantes para auditoría.' })[vista.value])
 const datosValidos = computed(() => {
   const partes = form.responsable_adquisicion.trim().split(/\s+/)
   return partes.length >= 2 && partes.every(p => /\p{L}/u.test(p)) && /^\d+(?:\.\d{1,2})?$/.test(String(form.monto_desembolsado)) && Number(form.monto_desembolsado) > 0 && ['Efectivo', 'Transferencia', 'QR'].includes(form.tipo_desembolso)
@@ -148,6 +152,7 @@ function documentos(e, todos = false) {
 async function api(url, options = {}) {
   const r = await fetch(url, { ...options, headers: { Authorization: `Token ${token()}`, ...options.headers } })
   const datos = await r.json().catch(() => ({}))
+  if (!r.ok) await mostrarErrorRegla(datos)
   if (!r.ok) throw new Error(datos.detalle || Object.values(datos)[0] || 'No fue posible completar la operación.')
   return datos
 }

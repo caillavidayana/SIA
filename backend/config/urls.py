@@ -20,7 +20,12 @@ from django.urls import (
 # RUTAS PRINCIPALES
 # ==========================================================
 
+from compras.caja_chica import saldo_view
+from config.publica import configuracion_publica
+
 urlpatterns = [
+    path('api/configuracion-publica/', configuracion_publica, name='configuracion-publica'),
+    path('api/caja-chica/saldo/', saldo_view, name='saldo-caja-chica'),
 
     # ======================================================
     # ADMINISTRACIÓN DJANGO

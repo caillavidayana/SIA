@@ -1,9 +1,11 @@
+from config.flujo_tickets import validar_transicion
 from usuarios.documentos import documentar, documentos_expediente, pdf_documento, validar_firma
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 from django.core.files.base import ContentFile
+from django.db import transaction
 
 from rest_framework import (
     status,
@@ -75,7 +77,7 @@ class NotificacionSoporteViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return NotificacionSoporte.objects.filter(destinatario=self.request.user).select_related("ticket")
+        return NotificacionSoporte.objects.filter(destinatario=self.request.user).select_related("ticket", "mantenimiento")
 
     @action(detail=True, methods=["post"], url_path="marcar-leida")
     def marcar_leida(self, request, pk=None):
@@ -135,12 +137,9 @@ def _categoria_por_defecto():
 #
 # ==========================================================
 
-SLA_POR_PRIORIDAD = {
-    "CRITICA": 4,
-    "ALTA": 8,
-    "MEDIA": 24,
-    "BAJA": 48,
-}
+from django.conf import settings
+# R04: conservar el nombre público usado por las vistas, con una sola configuración.
+SLA_POR_PRIORIDAD = settings.SIA_SLA_HORAS
 
 
 # ==========================================================
@@ -484,7 +483,7 @@ class TicketViewSet(
                 "estado",
             )
             .prefetch_related(
-                "especialistas_apoyo"
+                "especialistas_apoyo", "cotizaciones_r02"
             )
             .order_by(
                 "-creado_en"
@@ -790,6 +789,7 @@ class TicketViewSet(
             )
 
 
+        validar_transicion(ticket, estado_anulado)
         ticket.estado = estado_anulado
 
         ticket.activo = False
@@ -904,6 +904,7 @@ class TicketViewSet(
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            validar_transicion(ticket, estado_rechazado)
             ticket.estado = estado_rechazado
             ticket.criterio_tecnico = motivo
             ticket.validado_en = timezone.now()
@@ -958,6 +959,7 @@ class TicketViewSet(
             )
 
 
+        validar_transicion(ticket, estado_destino)
         ticket.estado = estado_destino
 
         ticket.validado_en = timezone.now()
@@ -1024,10 +1026,10 @@ class TicketViewSet(
         ticket = self.get_object()
 
 
-        if not validar_estado_ticket(
-            ticket,
-            ["EN_ANALISIS"]
-        ):
+        estados_gestion = ['EN_ANALISIS']
+        if ticket.reabierto_en and not ticket.tecnico_asignado_id:
+            estados_gestion.append('EN_EJECUCION')
+        if not validar_estado_ticket(ticket, estados_gestion):
 
             return Response(
                 {
@@ -1053,6 +1055,15 @@ class TicketViewSet(
         )
 
 
+        categoria_id = request.data.get('categoria')
+        if categoria_id:
+            from .models import CategoriaTicket
+            try:
+                ticket.categoria = CategoriaTicket.objects.get(pk=categoria_id)
+            except (CategoriaTicket.DoesNotExist, ValueError, TypeError):
+                return Response({'detalle': 'Seleccione una categoría válida.'}, status=400)
+        from config.reglas import prioridad_objeto
+        prioridad = prioridad_objeto(ticket) or prioridad
         if prioridad not in SLA_POR_PRIORIDAD:
 
             return Response(
@@ -1102,11 +1113,8 @@ class TicketViewSet(
 
 
         fecha_limite = (
-            ahora
-            +
-            timedelta(
-                hours=horas_sla
-            )
+            (getattr(ticket, 'reabierto_en', None) or ticket.creado_en)
+            + timedelta(hours=horas_sla)
         )
 
 
@@ -1133,6 +1141,7 @@ class TicketViewSet(
 
         ticket.save(
             update_fields=[
+                "categoria",
                 "prioridad",
                 "criterio_tecnico",
                 "sla_horas",
@@ -1196,10 +1205,10 @@ class TicketViewSet(
         ticket = self.get_object()
 
 
-        if not validar_estado_ticket(
-            ticket,
-            ["EN_ANALISIS"]
-        ):
+        estados_gestion = ['EN_ANALISIS']
+        if ticket.reabierto_en and not ticket.tecnico_asignado_id:
+            estados_gestion.append('EN_EJECUCION')
+        if not validar_estado_ticket(ticket, estados_gestion):
 
             return Response(
                 {
@@ -1213,7 +1222,7 @@ class TicketViewSet(
             )
 
 
-        if not ticket.prioridad:
+        if not ticket.clasificado_en:
 
             return Response(
                 {
@@ -1253,7 +1262,7 @@ class TicketViewSet(
                 is_active=True
             )
 
-        except Usuario.DoesNotExist:
+        except (Usuario.DoesNotExist, ValueError, TypeError):
 
             return Response(
                 {
@@ -1295,74 +1304,29 @@ class TicketViewSet(
                     status.HTTP_400_BAD_REQUEST
             )
 
-
-        estado_asignado = obtener_estado(
-            "ASIGNADO"
-        )
-
-
-        if not estado_asignado:
-
-            return Response(
-                {
-                    "detalle":
-                        "No existe el estado ASIGNADO."
-                },
-                status=
-                    status.HTTP_400_BAD_REQUEST
-            )
-
-
-        ahora = timezone.now()
-
-
-        ticket.tecnico_asignado = tecnico
-
-        ticket.estado = estado_asignado
-
-        ticket.asignado_en = ahora
-
-
-        ticket.save(
-            update_fields=[
-                "tecnico_asignado",
-                "estado",
-                "asignado_en",
-                "actualizado_en",
-            ]
-        )
-
-
-        apoyo_ids = request.data.get(
-            "especialistas_apoyo",
-            []
-        )
-
-
-        if isinstance(
-            apoyo_ids,
-            list
-        ):
-
-            especialistas = (
-                Usuario.objects
-                .filter(
-                    id__in=apoyo_ids,
-                    is_active=True,
-                    roles_asignados__activo=True,
-                    roles_asignados__rol__codigo__in=[
-                        "ESPECIALISTA",
-                        "AGENTE",
-                    ]
-                )
-                .distinct()
-            )
-
-
-            ticket.especialistas_apoyo.set(
-                especialistas
-            )
-
+        # R07: todos los responsables comparten cupo y bloqueo PostgreSQL.
+        from config.bloqueos import escritura_serializada
+        from .carga_tecnica import bloquear_y_validar
+        from rest_framework.exceptions import ValidationError
+        apoyo_ids=request.data.get('especialistas_apoyo', [])
+        if not isinstance(apoyo_ids, list) or any(type(i) is not int for i in apoyo_ids):
+            return Response({'detalle':'La lista de especialistas de apoyo no es válida.'},status=400)
+        with escritura_serializada(), transaction.atomic():
+            ticket=Ticket.objects.select_for_update().get(pk=ticket.pk)
+            if ticket.estado.codigo != 'EN_ANALISIS' and not (ticket.reabierto_en and not ticket.tecnico_asignado_id and ticket.estado.codigo == 'EN_EJECUCION'):
+                return Response({'detalle':'El ticket ya fue asignado o cambió de estado.'},status=409)
+            especialistas=Usuario.objects.filter(pk__in=apoyo_ids,is_active=True,roles_asignados__activo=True,roles_asignados__rol__activo=True,roles_asignados__rol__codigo__in=['ESPECIALISTA','AGENTE']).distinct()
+            if especialistas.count()!=len(set(apoyo_ids)):
+                return Response({'detalle':'Revise los especialistas de apoyo activos.'},status=400)
+            bloquear_y_validar([tecnico.pk,*apoyo_ids],ticket.pk)
+            if ticket.estado.codigo == 'EN_ANALISIS':
+                estado_asignado=obtener_estado('ASIGNADO')
+                validar_transicion(ticket,estado_asignado)
+                ticket.estado=estado_asignado
+            ticket.tecnico_asignado=tecnico
+            ticket.asignado_en=timezone.now()
+            ticket.save(update_fields=['tecnico_asignado','estado','asignado_en','actualizado_en'])
+            ticket.especialistas_apoyo.set(especialistas)
 
         registrar_bitacora(
             request=request,
@@ -1419,6 +1383,7 @@ class TicketViewSet(
                 {"detalle": "No existe el estado EN_DIAGNOSTICO."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        validar_transicion(ticket, estado_diagnostico)
         ticket.estado = estado_diagnostico
         ticket.inicio_atencion_en = timezone.now()
         ticket.save(update_fields=["estado", "inicio_atencion_en", "actualizado_en"])
@@ -1571,6 +1536,7 @@ class TicketViewSet(
         if evidencia_diagnostico:
             ticket.evidencia_diagnostico = evidencia_diagnostico
 
+        validar_transicion(ticket, estado_ejecucion)
         ticket.estado = (
             estado_ejecucion
         )
@@ -1625,238 +1591,61 @@ class TicketViewSet(
     #
     # ======================================================
 
-    @action(detail=True, methods=["post"], url_path="guardar-borrador-requerimiento")
+    @action(detail=True, methods=['post'], url_path='guardar-borrador-requerimiento')
     def guardar_borrador_requerimiento(self, request, pk=None):
-        if not tiene_permiso(request.user, "SOLICITAR_REQUERIMIENTO_COMPONENTE"):
-            return respuesta_sin_permiso("SOLICITAR_REQUERIMIENTO_COMPONENTE")
+        return self._guardar_compra_r01_r02(request, borrador=True)
 
+    @action(detail=True, methods=['post'], url_path='solicitar-requerimiento-componente')
+    def solicitar_requerimiento_componente(self, request, pk=None):
+        return self._guardar_compra_r01_r02(request, borrador=False)
+
+    @transaction.atomic
+    def _guardar_compra_r01_r02(self, request, borrador):
+        from config.reglas import monto_valido, error_limite
+        from compras.reglas_cotizaciones import nuevas_cotizaciones, validar_cotizaciones, guardar_cotizaciones, actualizar_proveedores
+        if not tiene_permiso(request.user, 'SOLICITAR_REQUERIMIENTO_COMPONENTE'):
+            return respuesta_sin_permiso('SOLICITAR_REQUERIMIENTO_COMPONENTE')
         ticket = self.get_object()
-        if not validar_estado_ticket(ticket, ["EN_EJECUCION"]):
-            return Response(
-                {"detalle": "El ticket debe encontrarse EN_EJECUCION."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
+        if not validar_estado_ticket(ticket, ['EN_EJECUCION']):
+            return Response({'detalle': 'El ticket debe encontrarse EN_EJECUCION.'}, status=400)
         if not (es_admin(request.user) or ticket.tecnico_asignado_id == request.user.id):
-            return Response(
-                {"detalle": "Solo el especialista asignado puede guardar el borrador."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if ticket.estado_compra_componente not in ["", "BORRADOR"]:
-            return Response(
-                {"detalle": "El requerimiento ya fue enviado y no puede editarse."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        ticket.requiere_compra = True
-        ticket.estado_compra_componente = "BORRADOR"
-        ticket.componente_requerido = str(request.data.get("componente_requerido", "")).strip()
-        ticket.especificaciones_tecnicas = str(request.data.get("especificaciones_tecnicas", "")).strip()
-        ticket.justificacion_compra = str(request.data.get("justificacion_compra", "")).strip()
-        ticket.proveedor_cotizacion = str(request.data.get("proveedor_cotizacion", "")).strip()
+            return Response({'detalle': 'Solo el especialista asignado puede solicitar el componente.'}, status=403)
+        if ticket.estado_compra_componente not in ['', 'BORRADOR']:
+            return Response({'detalle': 'El requerimiento ya fue enviado.'}, status=409)
+        monto = monto_valido(request.data.get('costo_estimado'), requerido=not borrador)
+        # La vía corresponde a DAF; el técnico no puede seleccionarla.
+        via = ticket.via_compra
+        # REQUERIMIENTO 1 (R01): el envío técnico no admite superar el límite.
+        error = error_limite(monto, 'CAJA_CHICA')
+        if error and not borrador:
+            return Response(error, status=400)
+        for campo in ('componente_requerido', 'especificaciones_tecnicas', 'justificacion_compra', 'proveedor_cotizacion'):
+            setattr(ticket, campo, str(request.data.get(campo, getattr(ticket, campo))).strip())
+        if not borrador and not all((ticket.componente_requerido, ticket.especificaciones_tecnicas, ticket.justificacion_compra)):
+            return Response({'detalle': 'Complete componente, características y justificación.'}, status=400)
         try:
-            ticket.cantidad_componente = max(1, int(request.data.get("cantidad_componente") or 1))
-            costo = request.data.get("costo_estimado")
-            ticket.costo_estimado = Decimal(str(costo)) if costo not in (None, "") else None
-        except (ValueError, TypeError, InvalidOperation):
-            return Response({"detalle": "Cantidad o costo estimado inválido."}, status=status.HTTP_400_BAD_REQUEST)
-        if request.FILES.get("informe_compra"):
-            ticket.informe_compra = request.FILES["informe_compra"]
-        cotizacion = request.FILES.get("cotizacion_archivo")
-        if cotizacion:
-            ticket.cotizacion_archivo = cotizacion
-        ticket.save(update_fields=[
-            "requiere_compra", "estado_compra_componente", "componente_requerido",
-            "especificaciones_tecnicas", "justificacion_compra", "proveedor_cotizacion",
-            "cantidad_componente", "costo_estimado", "cotizacion_archivo", "informe_compra", "actualizado_en",
-        ])
-        registrar_bitacora(
-            request=request, accion="BORRADOR_REQUERIMIENTO_COMPONENTE",
-            modulo="Soporte Técnico", detalle=f"Se guardó el borrador de compra del ticket {ticket.codigo}.",
-            nivel="INFO",
-        )
-        return respuesta_ticket(ticket, "Borrador de requerimiento guardado.")
-
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="solicitar-requerimiento-componente"
-    )
-    def solicitar_requerimiento_componente(
-        self,
-        request,
-        pk=None
-    ):
-
-        if not tiene_permiso(
-            request.user,
-            "SOLICITAR_REQUERIMIENTO_COMPONENTE"
-        ):
-
-            return respuesta_sin_permiso(
-                "SOLICITAR_REQUERIMIENTO_COMPONENTE"
-            )
-
-
-        ticket = self.get_object()
-
-
-        if not validar_estado_ticket(
-            ticket,
-            ["EN_EJECUCION"]
-        ):
-
-            return Response(
-                {
-                    "detalle": (
-                        "El ticket debe encontrarse "
-                        "EN_EJECUCION."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-
-        if not (
-            es_admin(request.user)
-            or
-            ticket.tecnico_asignado_id == request.user.id
-        ):
-
-            return Response(
-                {
-                    "detalle": (
-                        "Solo el especialista asignado "
-                        "puede solicitar el componente."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-
-        if ticket.estado_compra_componente not in ["", "BORRADOR"]:
-
-            return Response(
-                {
-                    "detalle": (
-                        "Este ticket ya tiene un "
-                        "requerimiento de componente "
-                        "en curso."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT
-            )
-
-
-        componente = str(request.data.get("componente_requerido", "")).strip()
-        especificaciones = str(request.data.get("especificaciones_tecnicas", "")).strip()
-        justificacion = str(request.data.get("justificacion_compra", "")).strip()
-        proveedor = str(request.data.get("proveedor_cotizacion", "")).strip()
-
-        if not componente:
-
-            return Response(
-                {"componente_requerido": "Debe indicar el componente requerido."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if not especificaciones:
-            return Response(
-                {"especificaciones_tecnicas": "Debe registrar las características técnicas."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not justificacion:
-            return Response(
-                {"justificacion_compra": "Debe justificar el requerimiento."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            cantidad = int(request.data.get("cantidad_componente") or 1)
-            if cantidad < 1:
+            ticket.cantidad_componente = int(request.data.get('cantidad_componente') or 1)
+            if ticket.cantidad_componente < 1:
                 raise ValueError
         except (ValueError, TypeError):
-            return Response(
-                {"cantidad_componente": "La cantidad debe ser mayor a cero."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-
-        costo_estimado = request.data.get("costo_estimado")
-
-        try:
-            costo_estimado = (
-                Decimal(str(costo_estimado))
-                if costo_estimado not in (None, "")
-                else None
-            )
-
-        except InvalidOperation:
-
-            return Response(
-                {"costo_estimado": "Monto estimado inválido."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-
+            return Response({'detalle': 'La cantidad debe ser mayor a cero.'}, status=400)
+        actualizar_proveedores(ticket, request)
+        nuevas = nuevas_cotizaciones(request)
+        if not borrador:
+            validar_cotizaciones(ticket, monto, nuevas)
+        ticket.costo_estimado, ticket.via_compra = monto, via
+        guardar_cotizaciones(ticket, nuevas, request.user)
         ticket.requiere_compra = True
-        ticket.cantidad_componente = cantidad
-        ticket.componente_requerido = componente
-        ticket.especificaciones_tecnicas = especificaciones
-        ticket.justificacion_compra = justificacion
-        ticket.proveedor_cotizacion = proveedor
-        ticket.costo_estimado = costo_estimado
-        cotizacion_compra = request.FILES.get("cotizacion_archivo") or ticket.cotizacion_archivo
-        if not cotizacion_compra:
-            return Response({"detalle": "Adjunte la cotización antes de enviar a jefatura."}, status=400)
-        ticket.informe_compra.save(
-            f"informe-requerimiento-{ticket.codigo}.pdf",
-            ContentFile(informe_requerimiento(ticket)),
-            save=False,
-        )
-        ticket.estado_compra_componente = "SOLICITADA"
-
-        # BPMN: el requerimiento viaja con su cotización adjunta.
-        cotizacion = request.FILES.get("cotizacion_archivo")
-
-        if cotizacion:
-            ticket.cotizacion_archivo = cotizacion
-
-        ticket.save(
-            update_fields=[
-                "requiere_compra",
-                "cantidad_componente",
-                "componente_requerido",
-                "especificaciones_tecnicas",
-                "justificacion_compra",
-                "proveedor_cotizacion",
-                "costo_estimado",
-                "estado_compra_componente",
-                "cotizacion_archivo", "informe_compra",
-                "actualizado_en",
-            ]
-        )
-
-
-        registrar_bitacora(
-            request=request,
-            accion="SOLICITAR_REQUERIMIENTO_COMPONENTE",
-            modulo="Soporte Técnico",
-            detalle=(
-                f"Se solicitó el componente '{componente}' "
-                f"con cotización para el ticket "
-                f"{ticket.codigo}. Pendiente de evaluación "
-                f"de viabilidad por Jefe UTIC."
-            ),
-            nivel="INFO",
-        )
-
-
-        return respuesta_ticket(
-            ticket,
-            "Requerimiento de componente enviado a Jefe UTIC para evaluar viabilidad."
-        )
-
+        ticket.estado_compra_componente = 'BORRADOR' if borrador else 'SOLICITADA'
+        if not borrador:
+            ticket.informe_compra.save(f'informe-requerimiento-{ticket.codigo}.pdf', ContentFile(informe_requerimiento(ticket)), save=False)
+        elif request.FILES.get('informe_compra'):
+            ticket.informe_compra = request.FILES['informe_compra']
+        ticket.save()
+        registrar_bitacora(request=request, accion='BORRADOR_REQUERIMIENTO_COMPONENTE' if borrador else 'SOLICITAR_REQUERIMIENTO_COMPONENTE',
+            modulo='Soporte Técnico', detalle=f'{ticket.codigo}: cotizaciones conservadas y proveedores registrados.', nivel='INFO')
+        return respuesta_ticket(ticket, 'Borrador guardado.' if borrador else 'Requerimiento enviado a Jefatura UTIC.')
 
     # ======================================================
     # 4.c EVALUAR VIABILIDAD DE COMPRA (Jefe UTIC)
@@ -1891,6 +1680,8 @@ class TicketViewSet(
         ticket = self.get_object()
         if ticket.estado_compra_componente != "SOLICITADA" or ticket.codigo_compra_vinculada:
             return Response({"detalle": "La compra no está pendiente de validación."}, status=400)
+        from compras.reglas_cotizaciones import validar_cotizaciones
+        validar_cotizaciones(ticket)
         from compras.informes_origen import asegurar_informe_tecnico
         asegurar_informe_tecnico(ticket)
         if not ticket.cotizacion_archivo:
@@ -1904,6 +1695,7 @@ class TicketViewSet(
         methods=["post"],
         url_path="evaluar-viabilidad-compra"
     )
+    @transaction.atomic
     def evaluar_viabilidad_compra(
         self,
         request,
@@ -1989,6 +1781,7 @@ class TicketViewSet(
 
             ticket.estado_compra_componente = "NO_VIABLE"
             ticket.motivo_no_viable = motivo
+            validar_transicion(ticket, estado_cerrado_sin_compra)
             ticket.estado = estado_cerrado_sin_compra
             ticket.activo = False
 
@@ -2055,6 +1848,8 @@ class TicketViewSet(
         # de módulo entre soporte y compras.
         from compras.models import SolicitudCompra
 
+        from compras.reglas_cotizaciones import validar_cotizaciones
+        validar_cotizaciones(ticket)
         from compras.informes_origen import asegurar_informe_tecnico
         informe = asegurar_informe_tecnico(ticket)
         proforma = ticket.cotizacion_archivo
@@ -2074,11 +1869,15 @@ class TicketViewSet(
             especificaciones=ticket.especificaciones_tecnicas or ticket.componente_requerido,
             justificacion=ticket.justificacion_compra or f"Requerido para atender el ticket de soporte {ticket.codigo}.",
             monto_estimado=ticket.costo_estimado,
+            via_adquisicion=ticket.via_compra,
             estado="CREADO_PENDIENTE_DAF",
             origen_modulo="SOPORTE",
             ticket_soporte=ticket,
             informe=informe, proforma=proforma, poa=poa, pedido=pedido,
         )
+
+        from compras.reglas_cotizaciones import transferir_cotizaciones
+        transferir_cotizaciones(ticket, solicitud, request.user)
 
         ticket.estado_compra_componente = "VIABLE"
         ticket.codigo_compra_vinculada = solicitud.codigo
@@ -2453,6 +2252,7 @@ class TicketViewSet(
         if evidencia_pruebas:
             ticket.evidencia_pruebas = evidencia_pruebas
 
+        validar_transicion(ticket, estado_verificacion)
         ticket.estado = (
             estado_verificacion
         )
@@ -2596,6 +2396,7 @@ class TicketViewSet(
 
             ticket.rework_count += 1
 
+            validar_transicion(ticket, estado_ejecucion)
             ticket.estado = (
                 estado_ejecucion
             )
@@ -2659,6 +2460,7 @@ class TicketViewSet(
             )
 
 
+        validar_transicion(ticket, estado_conformidad)
         ticket.estado = (
             estado_conformidad
         )
@@ -2842,6 +2644,7 @@ class TicketViewSet(
 
             ticket.rework_count += 1
 
+            validar_transicion(ticket, estado_ejecucion)
             ticket.estado = (
                 estado_ejecucion
             )
@@ -2914,6 +2717,7 @@ class TicketViewSet(
             ahora
         )
 
+        validar_transicion(ticket, estado_cerrado)
         ticket.estado = (
             estado_cerrado
         )
@@ -3080,6 +2884,37 @@ class TicketViewSet(
             )
         )
 
+    # ======================================================
+    # REGLA R06 - REAPERTURA DE TICKETS
+    # Permitir reapertura dentro de los primeros 7 dias
+    # ======================================================
+    @action(detail=True, methods=['post'], url_path='reabrir-ticket')
+    def reabrir_ticket(self, request, pk=None):
+        from config.bloqueos import escritura_serializada
+        from config.sla import fecha_limite, horas_sla
+        from .reapertura import puede_reabrir, archivar_ciclo
+        from .carga_tecnica import bloquear_y_validar
+        with escritura_serializada(), transaction.atomic():
+            ticket = self.get_object()
+            ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
+            if ticket.solicitante_id != request.user.pk:
+                return Response({'detalle': 'Solo el solicitante propietario puede reabrir su ticket.'}, status=403)
+            if not puede_reabrir(ticket, request.user):
+                return Response({'detalle': f'Solo puede reabrir un ticket Cerrado dentro de {settings.SIA_DIAS_REAPERTURA} días desde el cierre.'}, status=400)
+            tecnicos = list(ticket.especialistas_apoyo.values_list('pk', flat=True))
+            if ticket.tecnico_asignado_id:
+                tecnicos.append(ticket.tecnico_asignado_id)
+            bloquear_y_validar(tecnicos, ticket.pk)
+            archivar_ciclo(ticket)
+            ticket.estado = obtener_estado('EN_EJECUCION')
+            ticket.reabierto_en = timezone.now()
+            ticket.sla_horas = horas_sla(ticket.prioridad or 'MEDIA')
+            ticket.sla_fecha_limite = fecha_limite(ticket, ticket.prioridad or 'MEDIA')
+            ticket.activo = True
+            ticket.save()
+            registrar_bitacora(request=request, accion='REABRIR_TICKET_SOPORTE', modulo='Soporte Técnico',
+                detalle=f'{ticket.codigo}: reabierto por su solicitante. Se conserva cierre {ticket.cerrado_en.isoformat()} y expediente anterior.', nivel='INFO')
+            return respuesta_ticket(ticket, 'Ticket reabierto en proceso. Se conservó su fecha de cierre.')
 
     # ======================================================
     # 9. ELABORAR Y VALIDAR INFORME FINAL
@@ -3179,6 +3014,7 @@ class TicketViewSet(
             ContentFile(informe_final_jefatura(ticket, informe, validar_firma(request.data.get("firma")), request.user.nombre_completo)),
             save=False,
         )
+        validar_transicion(ticket, estado_cerrado)
         ticket.estado = estado_cerrado
         ticket.cerrado_en = ahora
 

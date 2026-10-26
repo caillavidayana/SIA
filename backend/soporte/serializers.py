@@ -15,11 +15,14 @@ from .models import (
 
 class NotificacionSoporteSerializer(serializers.ModelSerializer):
     ticket_codigo = serializers.CharField(source="ticket.codigo", read_only=True)
-    ticket_titulo = serializers.CharField(source="ticket.titulo", read_only=True)
+    ticket_titulo = serializers.SerializerMethodField()
+
+    def get_ticket_titulo(self, obj):
+        return (obj.ticket or obj.mantenimiento).titulo if (obj.ticket or obj.mantenimiento) else ''
 
     class Meta:
         model = NotificacionSoporte
-        fields = ["id", "tipo", "titulo", "mensaje", "leida", "creada_en", "leida_en", "ticket", "ticket_codigo", "ticket_titulo"]
+        fields = ["id", "tipo", "titulo", "mensaje", "leida", "creada_en", "leida_en", "ticket", "mantenimiento", "ticket_codigo", "ticket_titulo"]
         read_only_fields = fields
 
 
@@ -206,11 +209,37 @@ class TicketSerializer(
                 data[campo] = urlsplit(data[campo]).path
         return firmar_urls(data, self.context.get('request'))
 
+    prioridad = serializers.ChoiceField(choices=Ticket.PRIORIDADES, required=False)
+
+    puede_reabrir = serializers.SerializerMethodField()
+    fecha_limite_reapertura = serializers.SerializerMethodField()
+
+    def get_puede_reabrir(self, obj):
+        from .reapertura import puede_reabrir
+        request=self.context.get('request')
+        return puede_reabrir(obj, request.user if request else None)
+
+    def get_fecha_limite_reapertura(self, obj):
+        from .reapertura import fecha_maxima
+        return fecha_maxima(obj)
+
+    cotizaciones = serializers.SerializerMethodField()
+    prioridad_automatica = serializers.SerializerMethodField()
+
+    def get_cotizaciones(self, obj):
+        from compras.reglas_cotizaciones import datos_cotizaciones
+        return datos_cotizaciones(obj)
+
+    def get_prioridad_automatica(self, obj):
+        from config.reglas import prioridad_objeto
+        return prioridad_objeto(obj)
+
     class Meta:
 
         model = Ticket
 
         fields = [
+            'cotizaciones', 'prioridad_automatica', 'via_compra', 'puede_reabrir', 'fecha_limite_reapertura', 'reabierto_en', 'historial_reaperturas',
 
             # ------------------------------------------------
             # IDENTIFICACIÓN
@@ -224,7 +253,6 @@ class TicketSerializer(
 
             "descripcion",
 
-
             # ------------------------------------------------
             # SOLICITANTE
             # ------------------------------------------------
@@ -234,7 +262,6 @@ class TicketSerializer(
             "solicitante_nombre",
 
             "solicitante_email",
-
 
             # ------------------------------------------------
             # ÁREA / UBICACIÓN
@@ -250,7 +277,6 @@ class TicketSerializer(
 
             "equipo_afectado",
 
-
             # ------------------------------------------------
             # EVIDENCIA
             # ------------------------------------------------
@@ -260,7 +286,6 @@ class TicketSerializer(
             "evidencia_archivo",
 
             "evidencia_archivo_url",
-
 
             # ------------------------------------------------
             # CLASIFICACIÓN UTIC
@@ -278,7 +303,6 @@ class TicketSerializer(
 
             "criterio_tecnico",
 
-
             # ------------------------------------------------
             # SLA
             # ------------------------------------------------
@@ -293,9 +317,9 @@ class TicketSerializer(
 
             "sla_restante_minutos",
 
-
-            # ------------------------------------------------
+            # -----------------------------------------------
             # ESTADO
+
             # ------------------------------------------------
 
             "estado",
@@ -304,9 +328,9 @@ class TicketSerializer(
 
             "estado_codigo",
 
-
             # ------------------------------------------------
             # RESPONSABLES
+
             # ------------------------------------------------
 
             "tecnico_asignado",
@@ -316,7 +340,6 @@ class TicketSerializer(
             "especialistas_apoyo",
 
             "especialistas_apoyo_nombres",
-
 
             # ------------------------------------------------
             # DIAGNÓSTICO
@@ -341,7 +364,6 @@ class TicketSerializer(
             "evidencia_intervencion",
 
             "evidencia_intervencion_url",
-
 
             # ------------------------------------------------
             # COMPRA VINCULADA
@@ -375,7 +397,6 @@ class TicketSerializer(
 
             "compra_vinculada",
 
-
             # ------------------------------------------------
             # RESULTADOS
             # ------------------------------------------------
@@ -391,11 +412,16 @@ class TicketSerializer(
             "observaciones_usuario",
 
             "informe_tecnico",
+
             "informe_tecnico_pdf",
+
             "informe_tecnico_pdf_url",
             "informe_jefe_carrera",
+
             "informe_jefe_carrera_pdf",
+
             "informe_jefe_carrera_pdf_url",
+
             "informe_jefe_carrera_en",
 
             "informe_final",
@@ -409,7 +435,6 @@ class TicketSerializer(
             "informe_recibido_director_en",
 
             "proceso_finalizado_en",
-
 
             # ------------------------------------------------
             # FECHAS DEL WORKFLOW
@@ -429,7 +454,6 @@ class TicketSerializer(
 
             "conformidad_en",
 
-
             # ------------------------------------------------
             # CONTROL Y AUDITORÍA
             # ------------------------------------------------
@@ -443,8 +467,12 @@ class TicketSerializer(
             "actualizado_en",
 
             "cerrado_en",
+
         ]
 
+        # ==================================================
+        # INICIO R05 - PROTECCION DE ESTADO Y SLA
+        # ==================================================
 
         # ==================================================
         # CAMPOS CONTROLADOS POR SIGTA
@@ -459,6 +487,7 @@ class TicketSerializer(
         # ==================================================
 
         read_only_fields = [
+            'via_compra', 'reabierto_en', 'historial_reaperturas',
 
             "codigo",
 
@@ -472,7 +501,6 @@ class TicketSerializer(
 
             "tipo_problema",
 
-            "prioridad",
 
             "criterio_tecnico",
 
@@ -752,88 +780,20 @@ class TicketSerializer(
     # ESTADO DEL SLA
     # ======================================================
 
-    def get_sla_estado(
-        self,
-        obj
-    ):
-
-        # --------------------------------------------------
-        # TODAVÍA NO TIENE SLA
-        # --------------------------------------------------
-
+    def get_sla_estado(self, obj):
+        # R04: Resuelto/Cerrado no se etiquetan como Vencido.
         if not obj.sla_fecha_limite:
-
-            return "SIN_SLA"
-
-
-        # --------------------------------------------------
-        # TICKET CERRADO
-        # --------------------------------------------------
-
-        if obj.cerrado_en:
-
-            if obj.sla_cumplido is True:
-
-                return "CUMPLIDO"
-
-
-            if obj.sla_cumplido is False:
-
-                return "INCUMPLIDO"
-
-
-        # --------------------------------------------------
-        # TICKET ACTIVO
-        # --------------------------------------------------
-
-        ahora = timezone.now()
-
-
-        if ahora > obj.sla_fecha_limite:
-
-            return "VENCIDO"
-
-
-        # --------------------------------------------------
-        # CALCULAR RIESGO
-        # --------------------------------------------------
-
-        if obj.clasificado_en:
-
-            duracion_total = (
-                obj.sla_fecha_limite
-                -
-                obj.clasificado_en
-            )
-
-            tiempo_restante = (
-                obj.sla_fecha_limite
-                -
-                ahora
-            )
-
-
-            # Menos del 25 % del SLA restante
-            if (
-                duracion_total.total_seconds()
-                >
-                0
-            ):
-
-                porcentaje_restante = (
-                    tiempo_restante.total_seconds()
-                    /
-                    duracion_total.total_seconds()
-                )
-
-
-                if porcentaje_restante <= 0.25:
-
-                    return "EN_RIESGO"
-
-
-        return "EN_TIEMPO"
-
+            return 'SIN_SLA'
+        finalizado = obj.estado.codigo in {'PENDIENTE_CONFORMIDAD', 'PENDIENTE_INFORME_FINAL', 'CERRADO', 'CERRADO_SIN_COMPRA', 'RECHAZADO', 'ANULADO'}
+        if finalizado:
+            fin = obj.pruebas_en or obj.cerrado_en or timezone.now()
+            return 'CUMPLIDO' if fin <= obj.sla_fecha_limite else 'INCUMPLIDO'
+        restante = (obj.sla_fecha_limite-timezone.now()).total_seconds()
+        if restante < 0:
+            return 'VENCIDO'
+        if obj.sla_horas and restante <= obj.sla_horas*3600*0.25:
+            return 'EN_RIESGO'
+        return 'EN_TIEMPO'
 
     # ======================================================
     # MINUTOS RESTANTES DEL SLA
@@ -849,7 +809,7 @@ class TicketSerializer(
             return None
 
 
-        if obj.cerrado_en:
+        if obj.estado.codigo in {'CERRADO', 'CERRADO_SIN_COMPRA', 'RECHAZADO', 'ANULADO'}:
 
             return 0
 
@@ -946,6 +906,14 @@ class TicketSerializer(
         self,
         attrs
     ):
+
+        # R05: un PATCH no puede saltarse las acciones autorizadas del BPMN.
+        if self.instance and any(c in self.initial_data for c in ('estado', 'estado_codigo', 'sla_fecha_limite', 'sla_horas')):
+            raise serializers.ValidationError({'detalle': 'Use las acciones autorizadas para cambiar estado o SLA.'})
+        if self.instance and self.instance.clasificado_en and 'prioridad' in attrs:
+            from config.reglas import prioridad_objeto
+            if not prioridad_objeto(self.instance):
+                raise serializers.ValidationError({'detalle': 'La prioridad clasificada solo cambia mediante Jefatura.'})
 
         # --------------------------------------------------
         # IMPORTANTE:
@@ -1247,7 +1215,7 @@ class TicketSerializer(
                 #
                 # ==========================================
 
-                prioridad=None,
+                prioridad=validated_data.pop('prioridad', 'MEDIA'),
 
                 sla_horas=None,
 

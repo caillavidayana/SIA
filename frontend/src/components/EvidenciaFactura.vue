@@ -1,7 +1,7 @@
 <template>
   <div>
-    <label class="sia-secondary">Seleccionar factura<input type="file" accept="application/pdf,image/*" @change="elegir"></label>
-    <label class="sia-secondary">Tomar fotografía<input type="file" accept="image/*" capture="environment" @change="elegir"></label>
+    <label class="sia-secondary">Seleccionar factura<ArchivoInput type="file" accept="application/pdf,image/*" @change="elegir" /></label>
+    <label class="sia-secondary">Tomar fotografía<ArchivoInput type="file" accept="image/*" capture="environment" @change="elegir" /></label>
     <p v-if="modelValue">{{ modelValue.name }} <button type="button" @click="$emit('update:modelValue',null)">Quitar / reemplazar</button></p>
     <img v-if="preview && modelValue?.type.startsWith('image/')" :src="preview" alt="Previsualización de factura">
     <a v-else-if="preview" :href="preview" target="_blank" rel="noopener">Previsualizar documento</a>

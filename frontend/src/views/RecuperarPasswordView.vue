@@ -406,7 +406,7 @@
                     : ''
                 "
               >
-                ✓ Mínimo 8 caracteres
+                ✓ Mínimo {{ minimo ?? "…" }} caracteres
               </span>
 
               <span
@@ -566,6 +566,8 @@
 
 
 <script setup>
+import {usarPoliticaPassword} from '../utils/politicaPassword'
+const {minimo,errorPolitica}=usarPoliticaPassword()
 
 import {
   computed,
@@ -635,7 +637,7 @@ const mostrarConfirmacion = ref(false)
 ===================================== */
 
 const reglaLongitud = computed(() => {
-  return nuevaPassword.value.length >= 8
+  return minimo.value !== null && nuevaPassword.value.length >= minimo.value
 })
 
 

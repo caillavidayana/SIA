@@ -10,7 +10,7 @@
       <strong>Acta {{ documento.referencia }}</strong>
       <p>Entrega: {{ documento.datos.entrega }} · Recibe: {{ documento.datos.recibe }}</p>
       <button class="sia-secondary" @click="$emit('ver', documento.original_url, 'Acta de conformidad original')">Ver e imprimir acta PDF</button>
-      <label class="sia-field">Subir el acta PDF con ambas firmas<input :key="documento.id" type="file" accept="application/pdf,.pdf" :disabled="ocupado || generando" @change="elegir"></label>
+      <label class="sia-field">Subir el acta PDF con ambas firmas<ArchivoInput :key="documento.id" type="file" accept="application/pdf,.pdf" :disabled="ocupado || generando" @change="elegir" /></label>
       <p v-if="archivo">Seleccionado: {{ archivo.name }}</p>
       <label class="acta-check"><input v-model="confirmada" type="checkbox" :disabled="ocupado || generando">Confirmo que el PDF corresponde al acta generada y contiene las firmas de quien recibe y del encargado de almacén.</label>
     </div>

@@ -68,6 +68,28 @@ def archivo_expediente(request, ruta):
         vista = clase()
         vista.request, vista.action = request, 'retrieve'
         queryset = vista.get_queryset()
+        # R02: las cotizaciones adicionales heredan el acceso del expediente.
+        # Se usa su almacenamiento real (incluido el privado), sin exponer rutas.
+        from compras.models import CotizacionCompra
+        from mantenimiento.models import CotizacionMantenimiento
+        extras = []
+        etiqueta = queryset.model._meta.label_lower
+        if etiqueta == 'compras.solicitudcompra':
+            extras = [c.documento for c in CotizacionCompra.objects.filter(solicitud__in=queryset, documento=ruta)]
+        elif etiqueta == 'soporte.ticket':
+            extras = [c.documento for c in CotizacionCompra.objects.filter(ticket_soporte__in=queryset, documento=ruta)]
+            if not extras:
+                # R06: el acceso a archivos anteriores depende del mismo ticket.
+                from django.db.models.fields.files import FieldFile
+                for historico in queryset.filter(historial_reaperturas__icontains=ruta):
+                    for ciclo in historico.historial_reaperturas:
+                        for campo, nombre in ciclo.get('archivos', {}).items():
+                            if nombre == ruta:
+                                return respuesta_archivo(FieldFile(historico, historico._meta.get_field(campo), nombre))
+        elif etiqueta == 'mantenimiento.requerimientomantenimiento':
+            extras = [c.archivo for c in CotizacionMantenimiento.objects.filter(requerimiento__in=queryset, archivo=ruta)]
+        if extras:
+            return respuesta_archivo(extras[0])
         campos = [c.name for c in queryset.model._meta.fields if isinstance(c, FileField)]
         filtro = Q()
         for campo in campos:
@@ -90,3 +112,17 @@ def archivo_expediente(request, ruta):
                 respuesta['X-Frame-Options'] = 'SAMEORIGIN'
                 return respuesta
     raise NotFound()
+
+
+def respuesta_archivo(archivo):
+    try:
+        stream = archivo.open('rb')
+    except FileNotFoundError:
+        raise NotFound()
+    tipo = mimetypes.guess_type(archivo.name)[0] or 'application/octet-stream'
+    respuesta = FileResponse(stream, content_type=tipo, as_attachment=tipo not in {'application/pdf', 'image/png', 'image/jpeg', 'image/webp'})
+    respuesta['Cache-Control'] = 'private, no-store'
+    respuesta['X-Content-Type-Options'] = 'nosniff'
+    respuesta['Referrer-Policy'] = 'no-referrer'
+    respuesta['X-Frame-Options'] = 'SAMEORIGIN'
+    return respuesta

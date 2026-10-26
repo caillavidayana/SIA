@@ -112,7 +112,7 @@
             <textarea v-model="formDiagnostico.observaciones_diagnostico" rows="2" placeholder="Hallazgos adicionales de la inspección"></textarea>
           </label>
           <label class="campo">Evidencia del diagnóstico
-            <input type="file" accept="application/pdf,image/*" @change="formDiagnostico.archivo=$event.target.files?.[0]||null">
+            <ArchivoInput type="file" accept="application/pdf,image/*" @change="formDiagnostico.archivo=$event.target.files?.[0]||null" />
           </label>
 
           <fieldset class="compuerta">
@@ -143,20 +143,15 @@
           <label class="campo">Justificación
             <textarea v-model="formComponente.justificacion_compra" rows="3" placeholder="Por qué es indispensable para resolver la orden"></textarea>
           </label>
-          <label class="campo">Proveedor / referencia de cotización
-            <input v-model="formComponente.proveedor_cotizacion" placeholder="Opcional">
-          </label>
           <label class="campo">Costo estimado (Bs.)
             <input v-monto inputmode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" v-model="formComponente.costo_estimado" type="text" min="0" step="0.01">
           </label>
           <a v-if="ordenAbierta?.informe_compra" :href="ordenAbierta.informe_compra" target="_blank">Ver informe de requerimiento generado</a>
-          <label class="campo">Cotización / proforma
-            <input type="file" accept="application/pdf,image/*" @change="onCotizacion">
-          </label>
+          <CotizacionesRequerimiento ref="cotizacionesFormulario" :expediente="ordenAbierta?.id" :guardadas="ordenAbierta?.cotizaciones || []" :monto="formComponente.costo_estimado" />
           <div class="actions">
             <button @click="cerrarOrden">Cancelar</button>
             <button :disabled="procesando" @click="guardarBorrador">Guardar borrador</button>
-            <button class="primary" :disabled="procesando || !formComponente.componente_requerido.trim() || !formComponente.especificaciones_tecnicas.trim() || !formComponente.justificacion_compra.trim() || !(formComponente.archivo || ordenAbierta?.cotizacion_archivo)" @click="enviarRequerimiento">Enviar requerimiento</button>
+            <button class="primary" :disabled="procesando || !formComponente.componente_requerido.trim() || !formComponente.especificaciones_tecnicas.trim() || !formComponente.justificacion_compra.trim()" @click="enviarRequerimiento">Enviar requerimiento</button>
           </div>
         </template>
       </section>
@@ -230,7 +225,7 @@
               <textarea v-model="formIntervencion.componentes_utilizados" rows="2" placeholder="Opcional"></textarea>
             </label>
             <label class="campo">Evidencia posterior a la intervención
-              <input type="file" accept="application/pdf,image/*" @change="formIntervencion.archivo=$event.target.files?.[0]||null">
+              <ArchivoInput type="file" accept="application/pdf,image/*" @change="formIntervencion.archivo=$event.target.files?.[0]||null" />
             </label>
             <div class="actions">
               <button @click="ticketActivo=null">Cancelar</button>
@@ -244,7 +239,7 @@
               <textarea v-model="formPruebas.resultado_pruebas" rows="4" placeholder="Pruebas efectuadas y comportamiento del equipo"></textarea>
             </label>
             <fieldset class="compuerta"><legend>¿El equipo funciona técnicamente?</legend><label><input v-model="formPruebas.funciona_tecnicamente" type="radio" :value="true"> Sí</label><label><input v-model="formPruebas.funciona_tecnicamente" type="radio" :value="false"> No</label></fieldset>
-            <label class="campo">Informe técnico con cuadros / evidencia de pruebas<input type="file" accept="application/pdf,image/*" @change="formPruebas.archivo=$event.target.files?.[0]||null"></label>
+            <label class="campo">Informe técnico con cuadros / evidencia de pruebas<ArchivoInput type="file" accept="application/pdf,image/*" @change="formPruebas.archivo=$event.target.files?.[0]||null" /></label>
             <div v-if="formPruebas.funciona_tecnicamente" class="report-preview"><b>Vista previa automática del informe</b><p><strong>Ticket:</strong> {{ticketActivo.codigo}} · {{ticketActivo.titulo}}<br><strong>Solicitante:</strong> {{ticketActivo.solicitante_nombre}}<br><strong>Diagnóstico:</strong> {{ticketActivo.diagnostico}}<br><strong>Intervención:</strong> {{ticketActivo.solucion}}<br><strong>Pruebas:</strong> {{formPruebas.resultado_pruebas}}<br><strong>Responsable:</strong> {{nombre}}</p></div>
             <label v-if="formPruebas.funciona_tecnicamente" class="campo">Conclusión técnica
               <textarea v-model="formPruebas.informe_tecnico" rows="3" placeholder="Conclusión técnica final"></textarea>
@@ -318,6 +313,9 @@
 </template>
 
 <script setup>
+import CotizacionesRequerimiento from '../components/CotizacionesRequerimiento.vue'
+const cotizacionesFormulario = ref(null)
+
 import ActasRecepcionTecnico from '../components/ActasRecepcionTecnico.vue'
 import { solicitarFirma } from '../utils/firma'
 import DocumentosExpediente from '../components/DocumentosExpediente.vue'
@@ -453,6 +451,8 @@ function textoEspera(t) {
 
 function textoSla(t) {
   if (!t?.sla_horas) return 's/d'
+  if (t.sla_estado==='CUMPLIDO') return `${t.sla_horas} h · cumplido`
+  if (t.sla_estado==='INCUMPLIDO') return `${t.sla_horas} h · atención finalizada fuera de plazo`
   const minutos = Number(t.sla_restante_minutos)
   if (!Number.isFinite(minutos)) return `${t.sla_horas} h`
   if (minutos <= 0) return `${t.sla_horas} h · vencido`
@@ -460,7 +460,7 @@ function textoSla(t) {
 }
 
 function claseSla(t) {
-  return Number(t?.sla_restante_minutos) <= 0 ? 'vencido' : ''
+  return t?.sla_estado === 'VENCIDO' ? 'vencido' : ''
 }
 
 function fecha(valor) {
@@ -589,7 +589,7 @@ function mostrarMensaje(titulo, texto, tipo = 'ok') {
 ========================================================== */
 
 const formDiagnostico = reactive({ diagnostico: '', plan_solucion: '', observaciones_diagnostico: '', requiere_compra: null, archivo: null })
-const formComponente = reactive({ componente_requerido: '', cantidad_componente: 1, especificaciones_tecnicas: '', justificacion_compra: '', proveedor_cotizacion: '', costo_estimado: '', archivo: null })
+const formComponente = reactive({ via_compra: 'CAJA_CHICA', componente_requerido: '', cantidad_componente: 1, especificaciones_tecnicas: '', justificacion_compra: '', proveedor_cotizacion: '', costo_estimado: '', archivo: null })
 const formIntervencion = reactive({ solucion: '', acciones_realizadas: '', componentes_utilizados: '', archivo: null })
 const formPruebas = reactive({ resultado_pruebas: '', funciona_tecnicamente: null, informe_tecnico: '', archivo: null })
 
@@ -600,7 +600,7 @@ function recibirOrden(t) {
   formDiagnostico.plan_solucion = ''
   formDiagnostico.observaciones_diagnostico = t.observaciones_diagnostico || ''
   formDiagnostico.requiere_compra = null
-  Object.assign(formComponente, { componente_requerido:t.componente_requerido||'', cantidad_componente:t.cantidad_componente||1, especificaciones_tecnicas:t.especificaciones_tecnicas||'', justificacion_compra:t.justificacion_compra||'', proveedor_cotizacion:t.proveedor_cotizacion||'', costo_estimado:t.costo_estimado||'', archivo:null })
+  Object.assign(formComponente, { via_compra:t.via_compra||'CAJA_CHICA', componente_requerido:t.componente_requerido||'', cantidad_componente:t.cantidad_componente||1, especificaciones_tecnicas:t.especificaciones_tecnicas||'', justificacion_compra:t.justificacion_compra||'', proveedor_cotizacion:t.proveedor_cotizacion||'', costo_estimado:t.costo_estimado||'', archivo:null })
 }
 
 function cerrarOrden() {
@@ -636,25 +636,23 @@ async function guardarDiagnostico() {
    C. REQUERIMIENTO DE COMPONENTE
 ========================================================== */
 
-function onCotizacion(evento) {
-  formComponente.archivo = evento.target.files?.[0] || null
-}
-
 function datosRequerimiento() {
   const datos = new FormData()
   for (const campo of ['componente_requerido','cantidad_componente','especificaciones_tecnicas','justificacion_compra','proveedor_cotizacion','costo_estimado']) datos.append(campo, formComponente[campo] ?? '')
-  if (formComponente.archivo) datos.append('cotizacion_archivo', formComponente.archivo)
+  cotizacionesFormulario.value?.adjuntar(datos)
   return datos
 }
 
 async function guardarBorrador() {
   try {
     await postAccion(ordenAbierta.value, 'guardar-borrador-requerimiento', datosRequerimiento(), true)
+    cotizacionesFormulario.value?.limpiar()
     mostrarMensaje('Borrador guardado', 'Puede salir y continuar después desde Trabajos en curso.')
   } catch (e) { mostrarMensaje('No se pudo guardar el borrador', String(e.message), 'error') }
 }
 
 async function enviarRequerimiento() {
+  if (!(await cotizacionesFormulario.value?.validar())) return
   try {
     await postAccion(ordenAbierta.value, 'solicitar-requerimiento-componente', datosRequerimiento(), true)
     cerrarOrden()

@@ -236,13 +236,14 @@
 
               <input
                 v-model.number="form.limite_caja_chica"
+                disabled
                 type="number"
                 min="0"
               />
 
               <small>
-                Valor utilizado para determinar
-                la vía de adquisición correspondiente.
+                Configurado mediante SIA_LIMITE_CAJA_CHICA en el entorno del servidor.
+                Reinicie Django después de cambiarlo.
               </small>
 
             </div>

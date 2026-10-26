@@ -75,6 +75,8 @@
 
             <!-- TÍTULO -->
 
+            <!-- REQUERIMIENTO 3 (R03): categoría del problema; prioridad en Jefatura. -->
+            <div class="field full"><label>Categoría</label><select v-model="form.categoria"><option v-for="c in categorias" :key="c.id" :value="c.id">{{c.nombre}}</option></select></div>
             <div class="field full">
 
               <label>
@@ -277,14 +279,13 @@
 
             <!-- INPUT OCULTO -->
 
-            <input
+            <ArchivoInput
               id="evidencia-archivo"
               ref="inputArchivo"
               class="file-input"
               type="file"
               accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-              @change="seleccionarArchivo"
-            />
+              @change="seleccionarArchivo" />
 
 
             <!-- CAJA PARA SELECCIONAR -->
@@ -622,6 +623,7 @@ const form =
     area: '',
 
     categoria: '',
+    prioridad: 'MEDIA',
 
     ubicacion: '',
     referencia_ubicacion: '',
@@ -707,9 +709,7 @@ async function cargarCatalogos() {
       { headers: headersAuth() }
     )
 
-    const categoriasRespuesta = esMantenimiento.value
-      ? null
-      : await fetch('/api/soporte/categorias/', { headers: headersAuth() })
+    const categoriasRespuesta = await fetch('/api/soporte/categorias/', { headers: headersAuth() })
 
     if (
       [401, 403].includes(areasRespuesta.status)
@@ -1046,8 +1046,6 @@ async function crearTicket() {
     ||
     !form.area
     ||
-    (!esMantenimiento.value && !form.categoria)
-    ||
     !form.ubicacion.trim()
     ||
     !form.equipo_afectado.trim()
@@ -1086,6 +1084,8 @@ async function crearTicket() {
     )
 
 
+    if (form.categoria) datosFormulario.append('categoria', String(form.categoria))
+
     datosFormulario.append(
       'descripcion',
       form.descripcion.trim()
@@ -1102,9 +1102,9 @@ async function crearTicket() {
 
     if (esMantenimiento.value) {
       datosFormulario.append('tipo', 'CORRECTIVO')
-    } else {
-      datosFormulario.append('categoria', String(form.categoria))
     }
+
+
 
 
     datosFormulario.append('ubicacion', form.ubicacion.trim())

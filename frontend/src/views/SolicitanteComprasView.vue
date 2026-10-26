@@ -493,10 +493,10 @@
                 Adjunte el Informe, la Proforma y el POA en PDF para enviar la solicitud a la DAF. El Pedido es opcional.
               </p>
               <div class="document-grid">
-                <label class="document-input"><span>Informe</span><input type="file" accept="application/pdf" required @change="seleccionarArchivo('informe', $event)" /></label>
-                <label class="document-input"><span>Proforma</span><input type="file" accept="application/pdf" required @change="seleccionarArchivo('proforma', $event)" /></label>
-                <label class="document-input"><span>POA</span><input type="file" accept="application/pdf" required @change="seleccionarArchivo('poa', $event)" /></label>
-                <label class="document-input"><span>Pedido (opcional)</span><input type="file" accept="application/pdf" @change="seleccionarArchivo('pedido', $event)" /></label>
+                <label class="document-input"><span>Informe</span><ArchivoInput type="file" accept="application/pdf" required @change="seleccionarArchivo('informe', $event)" /></label>
+                <label class="document-input"><span>Proforma</span><ArchivoInput type="file" accept="application/pdf" required @change="seleccionarArchivo('proforma', $event)" /></label>
+                <label class="document-input"><span>POA</span><ArchivoInput type="file" accept="application/pdf" required @change="seleccionarArchivo('poa', $event)" /></label>
+                <label class="document-input"><span>Pedido (opcional)</span><ArchivoInput type="file" accept="application/pdf" @change="seleccionarArchivo('pedido', $event)" /></label>
               </div>
             </div>
 
@@ -544,6 +544,14 @@
     </div>
 
   </div>
+
+  <ModalLimiteCajaChica
+    :visible="mostrarModalCajaChica"
+    :monto="montoAvisoCajaChica"
+    :limite="limiteCajaChica ?? 0"
+    @cancelar="cancelarAvisoCajaChica"
+    @continuar="continuarDespuesAvisoCajaChica"
+  />
 </template>
 
 
@@ -551,6 +559,8 @@
 import { solicitarFirma } from '../utils/firma'
 import DocumentosExpediente from '../components/DocumentosExpediente.vue'
 import UsuarioHeader from '../components/UsuarioHeader.vue'
+
+import ModalLimiteCajaChica from '../components/ModalLimiteCajaChica.vue'
 import {
   computed,
   onMounted,
@@ -576,6 +586,7 @@ const filtroEstado = ref('')
 
 const cargando = ref(true)
 const guardando = ref(false)
+const verificandoLimite = ref(false)
 
 const mostrarFormulario = ref(true)
 const editando = ref(false)
@@ -583,6 +594,10 @@ const editando = ref(false)
 const solicitudId = ref(null)
 
 const mensajeModal = ref('')
+const mostrarModalCajaChica = ref(false)
+const limiteCajaChica = ref(null)
+const montoAvisoCajaChica = ref(0)
+const avisoCajaChicaConfirmado = ref(false)
 
 
 const form = reactive({
@@ -608,6 +623,47 @@ const archivos = reactive({
 function seleccionarArchivo(campo, evento) {
   archivos[campo] = evento.target.files?.[0] || null
 }
+
+async function consultarLimiteCajaChica() {
+  const respuesta = await fetch(
+    '/api/auditoria/limite-caja-chica/',
+    {
+      headers: {
+        Authorization: `Token ${token()}`
+      }
+    }
+  )
+
+  if (!respuesta.ok) {
+    throw new Error('No se pudo consultar el límite de Caja Chica.')
+  }
+
+  const datos = await respuesta.json()
+  const limite = Number(datos.limite_caja_chica)
+
+  if (!Number.isFinite(limite) || limite < 0) {
+    throw new Error('El límite de Caja Chica no es válido.')
+  }
+
+  limiteCajaChica.value = limite
+  return limite
+}
+
+function cancelarAvisoCajaChica() {
+  mostrarModalCajaChica.value = false
+}
+
+async function continuarDespuesAvisoCajaChica() {
+  mostrarModalCajaChica.value = false
+  avisoCajaChicaConfirmado.value = true
+
+  try {
+    await guardar()
+  } finally {
+    avisoCajaChicaConfirmado.value = false
+  }
+}
+
 
 
 const token = () =>
@@ -905,10 +961,40 @@ function editarSolicitud(solicitud) {
 }
 
 
+
 async function guardar() {
 
   mensajeModal.value = ''
 
+  if (guardando.value || verificandoLimite.value || mostrarModalCajaChica.value) return
+
+  if (!avisoCajaChicaConfirmado.value) {
+    const monto = Number(form.monto_estimado)
+
+    if (
+      form.monto_estimado !== '' &&
+      Number.isFinite(monto) &&
+      monto > 0
+    ) {
+      verificandoLimite.value = true
+      try {
+        const limite = await consultarLimiteCajaChica()
+
+        if (monto > limite) {
+          montoAvisoCajaChica.value = monto
+          mostrarModalCajaChica.value = true
+          return
+        }
+      } catch (error) {
+        console.error(error)
+        mensajeModal.value =
+          'No se pudo verificar el límite de Caja Chica. Intente nuevamente.'
+        return
+      } finally {
+        verificandoLimite.value = false
+      }
+    }
+  }
   if (!editando.value) {
     for (const campo of ['informe', 'poa', 'pedido', 'proforma']) {
       const archivo = archivos[campo]
@@ -1070,6 +1156,8 @@ function verSolicitud(solicitud) {
 
 function cerrarFormulario() {
 
+  mostrarModalCajaChica.value = false
+  avisoCajaChicaConfirmado.value = false
   mostrarFormulario.value = false
 
   mensajeModal.value = ''

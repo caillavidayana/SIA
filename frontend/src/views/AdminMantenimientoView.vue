@@ -1685,11 +1685,10 @@
                 Fotografía del trabajo
               </label>
 
-              <input
+              <ArchivoInput
                 type="file"
                 accept=".jpg,.jpeg,.png,.pdf"
-                @change="seleccionarFotografia"
-              />
+                @change="seleccionarFotografia" />
 
               <small
                 v-if="

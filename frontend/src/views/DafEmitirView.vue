@@ -219,7 +219,7 @@
       <div class="success-modal">
         <div class="success-icon">✓</div>
         <h2>¡Generada con Éxito!</h2>
-        <p>Su certificación fue generada exitosamente. El expediente fue derivado al Director para autorizar la compra.</p>
+        <p>Su certificación fue generada exitosamente. El expediente continúa al siguiente responsable indicado en el trámite.</p>
         <button class="btn-success-close" @click="cerrarModalExito">Aceptar</button>
       </div>
     </div>
@@ -229,6 +229,7 @@
 
 <script setup>
 import UsuarioHeader from '../components/UsuarioHeader.vue'
+import { mostrarErrorRegla } from '../utils/errorRegla'
 import ModalSia from '../components/ModalSia.vue'
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -579,7 +580,11 @@ async function emitirCertificacion() {
     })
     
     const d = await r.json().catch(()=>({}))
-    if (!r.ok) throw new Error(d.detalle || Object.values(d)[0] || 'Error al emitir.')
+    // REQUERIMIENTO 9 (R09): saldo insuficiente conserva el formulario.
+    if (!r.ok) {
+      if (await mostrarErrorRegla(d)) return
+      throw new Error(d.detalle || Object.values(d)[0] || 'Error al emitir.')
+    }
 
     mostrarModalExito.value = true
     itemActivo.value = null

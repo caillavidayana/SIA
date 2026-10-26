@@ -44,6 +44,21 @@ class EstadoMantenimiento(models.Model):
 # ==========================================================
 
 class RequerimientoMantenimiento(models.Model):
+    # R03: reutiliza el catálogo de categorías; los históricos pueden no tenerla.
+    categoria = models.ForeignKey('soporte.CategoriaTicket', on_delete=models.PROTECT, null=True, blank=True)
+    # R03: la API y las escrituras del ORM imponen la prioridad automática.
+    def save(self, *args, **kwargs):
+        from config.reglas import prioridad_objeto
+        prioridad = prioridad_objeto(self) or (self.prioridad_jefatura if self.prioridad_jefatura else 'MEDIA')
+        if prioridad:
+            self.prioridad_jefatura = prioridad
+            campos = {'prioridad_jefatura'}
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = set(kwargs['update_fields']) | campos
+        super().save(*args, **kwargs)
+
+    via_compra = models.CharField(max_length=20, choices=[('CAJA_CHICA', 'Caja chica'), ('FINANZAS', 'Finanzas')], default='CAJA_CHICA')
+
 
     # ======================================================
     # TIPOS
@@ -442,3 +457,38 @@ class RequerimientoMantenimiento(models.Model):
             f"{self.codigo} - "
             f"{self.titulo}"
         )
+
+# ==========================================================
+# R02 - COTIZACIONES MULTIPLES DE MANTENIMIENTO
+# ==========================================================
+# Se mantiene RequerimientoMantenimiento.cotizacion_archivo
+# por compatibilidad con los registros y procesos existentes.
+# Las nuevas cotizaciones se almacenan como registros separados.
+
+class CotizacionMantenimiento(models.Model):
+    proveedor = models.CharField(max_length=180, blank=True)
+    empresa = models.CharField(max_length=180, blank=True)
+    proveedor_identificador = models.CharField(max_length=60, blank=True)
+    requerimiento = models.ForeignKey(
+        RequerimientoMantenimiento,
+        on_delete=models.CASCADE,
+        related_name="cotizaciones_r02",
+    )
+    archivo = models.FileField(
+        upload_to="mantenimiento/cotizaciones/%Y/%m/",
+    )
+    nombre_original = models.CharField(max_length=255, blank=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cotizaciones_mantenimiento_r02",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["creado_en", "id"]
+
+    def __str__(self):
+        return f"Cotización {self.pk} - {self.requerimiento.codigo}"

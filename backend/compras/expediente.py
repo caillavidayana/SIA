@@ -25,17 +25,13 @@ def documentos_faltantes(solicitud):
         if not getattr(solicitud, campo)
     ]
 
-    # R02: Compras mayores a Bs 500 requieren tres cotizaciones
-    if solicitud.monto_estimado is not None:
-        if solicitud.monto_estimado > Decimal("500.00"):
-            cantidad = CotizacionCompra.objects.filter(
-                solicitud=solicitud
-            ).count()
-
-            if cantidad < 3:
-                faltantes.append(
-                    f"Se requieren 3 cotizaciones (registradas: {cantidad})"
-                )
+    # REQUERIMIENTO 2 (R02): mismo umbral configurable de 500 que el técnico.
+    from .reglas_cotizaciones import requeridas
+    minimo = requeridas(solicitud.monto_estimado)
+    if minimo > 1:
+        cantidad = CotizacionCompra.objects.filter(solicitud=solicitud).count()
+        if cantidad < minimo:
+            faltantes.append(f"Se requieren {minimo} cotizaciones (registradas: {cantidad})")
 
     return faltantes
 

@@ -7,6 +7,7 @@ from usuarios.models import Area
 from .models import (
     EstadoMantenimiento,
     RequerimientoMantenimiento,
+    CotizacionMantenimiento,
 )
 
 
@@ -31,6 +32,27 @@ class EstadoMantenimientoSerializer(
             "es_terminal",
             "activo",
         ]
+
+
+# ==========================================================
+# R02 - COTIZACIONES DE MANTENIMIENTO (SOLO LECTURA)
+# ==========================================================
+
+class CotizacionMantenimientoSerializer(serializers.ModelSerializer):
+    archivo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CotizacionMantenimiento
+        fields = ["id", "nombre_original", "archivo_url", "creado_en", "proveedor", "proveedor_identificador"]
+        read_only_fields = fields
+
+    def get_archivo_url(self, obj):
+        if not obj.archivo:
+            return None
+        try:
+            return obj.archivo.url
+        except ValueError:
+            return None
 
 
 # ==========================================================
@@ -109,21 +131,48 @@ class RequerimientoMantenimientoSerializer(
         required=False
     )
 
+    # R02: archivos asociados y progreso para el formulario.
+    cotizaciones_r02 = CotizacionMantenimientoSerializer(many=True, read_only=True)
+    cantidad_cotizaciones_r02 = serializers.SerializerMethodField()
+    cotizaciones_requeridas_r02 = serializers.SerializerMethodField()
+    cotizaciones_faltantes_r02 = serializers.SerializerMethodField()
+
+    def get_cantidad_cotizaciones_r02(self, obj):
+        archivos = {c.archivo.name for c in obj.cotizaciones_r02.all() if c.archivo}
+        if obj.cotizacion_archivo:
+            archivos.add(obj.cotizacion_archivo.name)
+        return len(archivos)
+
+    def get_cotizaciones_requeridas_r02(self, obj):
+        from decimal import Decimal
+        from compras.reglas_cotizaciones import requeridas
+        return requeridas(obj.costo_estimado)
+
+    def get_cotizaciones_faltantes_r02(self, obj):
+        return max(0, self.get_cotizaciones_requeridas_r02(obj) - self.get_cantidad_cotizaciones_r02(obj))
+
     compra_vinculada = (
         serializers.SerializerMethodField()
     )
 
     sla_horas = serializers.SerializerMethodField()
     sla_fecha_limite = serializers.SerializerMethodField()
+    sla_estado = serializers.SerializerMethodField()
+
+    def get_sla_estado(self, obj):
+        from datetime import timedelta
+        if obj.estado.codigo in {'INFORME_REGISTRADO','CONFORMIDAD_INFORMADA','FINALIZADO','CERRADO_SIN_COMPRA','RECHAZADO','ANULADO'}:
+            return 'FINALIZADO'
+        return 'VENCIDO' if timezone.now() > obj.creado_en+timedelta(hours=self.get_sla_horas(obj)) else 'EN_TIEMPO'
 
     def get_sla_horas(self, obj):
-        from .prioridades import SLA_POR_PRIORIDAD
-        return SLA_POR_PRIORIDAD.get(obj.prioridad_jefatura)
+        from config.sla import horas_sla
+        return horas_sla(obj.prioridad_jefatura or 'MEDIA')
 
     def get_sla_fecha_limite(self, obj):
         from datetime import timedelta
         horas = self.get_sla_horas(obj)
-        return (obj.clasificado_en + timedelta(hours=horas)).isoformat() if horas and obj.clasificado_en else None
+        return (obj.creado_en + timedelta(hours=horas)).isoformat() if horas and obj.creado_en else None
 
 
     def to_representation(self, instance):
@@ -134,11 +183,23 @@ class RequerimientoMantenimientoSerializer(
                 data[campo] = urlsplit(data[campo]).path
         return firmar_urls(data, self.context.get('request'))
 
+    cotizaciones = serializers.SerializerMethodField()
+    prioridad_automatica = serializers.SerializerMethodField()
+
+    def get_cotizaciones(self, obj):
+        from compras.reglas_cotizaciones import datos_cotizaciones
+        return datos_cotizaciones(obj)
+
+    def get_prioridad_automatica(self, obj):
+        from config.reglas import prioridad_objeto
+        return prioridad_objeto(obj)
+
     class Meta:
 
         model = RequerimientoMantenimiento
 
         fields = [
+            'cotizaciones', 'prioridad_automatica', 'via_compra', 'categoria',
 
             "id",
 
@@ -186,7 +247,7 @@ class RequerimientoMantenimientoSerializer(
 
             "auxiliar_asignado_nombre",
             "prioridad_jefatura",
-            "sla_horas", "sla_fecha_limite",
+            "sla_horas", "sla_fecha_limite", "sla_estado",
             "criterio_prioridad",
 
             "compra_vinculada",
@@ -234,6 +295,8 @@ class RequerimientoMantenimientoSerializer(
             "costo_estimado",
 
             "cotizacion_archivo", "informe_compra",
+            "cotizaciones_r02", "cantidad_cotizaciones_r02",
+            "cotizaciones_requeridas_r02", "cotizaciones_faltantes_r02",
 
             "motivo_no_viable",
 
@@ -286,6 +349,7 @@ class RequerimientoMantenimientoSerializer(
 
 
         read_only_fields = [
+            'via_compra',
 
             "motivo_rechazo", "validado_en", "clasificado_en",
             "diagnostico", "plan_solucion", "diagnosticado_en",

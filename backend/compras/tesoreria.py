@@ -27,12 +27,13 @@ def datos_entrega(data):
 
 def pdf_recibo(datos):
     from types import SimpleNamespace
+    seccion_saldo = [('CONTROL DE CAJA CHICA', [('Mes del fondo', datos['mes_fondo']), ('Saldo restante proyectado después de esta entrega', 'Bs. '+datos['saldo_restante']), ('Momento del saldo', 'Calculado al emitir este recibo. La confirmación vuelve a validar el saldo y la operación se registra una sola vez.')])] if 'saldo_restante' in datos else []
     return _documento_pdf(
         'RECIBO DE ENTREGA DE FONDOS', 'Caja Chica - constancia para impresión y firma',
         SimpleNamespace(codigo=datos['codigo']),
         [('REQUERIMIENTO', [('Objeto de la compra', datos['titulo']), ('Área solicitante', datos['area']), ('Solicitante', datos['solicitante'])]),
          ('ENTREGA DE FONDOS', [('Importe entregado', f"Bs. {datos['monto']}"), ('Método de desembolso', datos['metodo']), ('Nombre completo de quien recibe', datos['recibe']), ('Nombre completo de quien entrega', datos['entrega'])]),
-         ('CONFORMIDAD', [('Declaración', 'Quien recibe declara haber recibido el importe indicado para el requerimiento identificado en este recibo.'), ('Respaldo', 'Imprimir, firmar por ambas partes y adjuntar el PDF firmado en Tesorería. Para transferencia o QR, adjuntar también el comprobante de la operación.')])],
+         ('CONFORMIDAD', [('Declaración', 'Quien recibe declara haber recibido el importe indicado para el requerimiento identificado en este recibo.'), ('Respaldo', 'Imprimir, firmar por ambas partes y adjuntar el PDF firmado en Tesorería. Para transferencia o QR, adjuntar también el comprobante de la operación.')])] + seccion_saldo,
         [('Referencia del recibo', datos['referencia']), ('Fecha de emisión', datos['fecha'])],
         unidad='TESORERÍA', espaciado=True, firmas=[([], datos['recibe'], 'Firma de quien recibe'), ([], datos['entrega'], 'Firma de quien entrega')],
     )
@@ -44,7 +45,8 @@ def representar(recibo):
             'generado_en': recibo.generado_en, 'confirmado_en': recibo.confirmado_en,
             'original_url': base + '/original/',
             'firmado_url': base + '/firmado/' if recibo.firmado else None,
-            'comprobante_url': base + '/comprobante/' if recibo.comprobante else None}
+            'comprobante_url': base + '/comprobante/' if recibo.comprobante else None,
+            'saldo_confirmado_url': base + '/constancia_saldo/' if recibo.constancia_saldo else None}
 
 
 @transaction.atomic
@@ -65,6 +67,10 @@ def recibos(view, request):
                  area=s.area.nombre if s.area_id else 'Sin área', entrega=request.user.nombre_completo,
                  usuario_entrega=request.user.pk, referencia=str(referencia),
                  fecha=timezone.localtime().strftime('%d/%m/%Y %H:%M'))
+    from .caja_chica import registrar_operacion
+    financiero = registrar_operacion(s, monto=datos['monto'], simular=True)
+    if financiero:
+        datos.update(mes_fondo=financiero['mes'], saldo_restante=str(financiero['saldo_despues']))
     r = ReciboTesoreria(solicitud=s, referencia=referencia, datos=datos, generado_por=request.user)
     r.original.save(f'recibo-{referencia}.pdf', ContentFile(pdf_recibo(datos)), save=False)
     r.save()
@@ -116,11 +122,27 @@ def confirmar(view, request):
         validar_archivo(comprobante)
     elif comprobante:
         validar_archivo(comprobante)
+    # R09: convertir el compromiso en desembolso; no descontar otra vez.
+    from .caja_chica import registrar_operacion
+    from config.reglas import error_limite
+    error = error_limite(Decimal(datos['monto']), s.via_adquisicion)
+    if error:
+        return Response(error, status=400)
+    financiero = registrar_operacion(s, monto=datos['monto'], desembolso=True)
+    if financiero:
+        # R09: evidencia del saldo real al confirmar, sin alterar el PDF firmado.
+        from types import SimpleNamespace
+        constancia = _documento_pdf('CONSTANCIA DE SALDO DE CAJA CHICA', 'Complemento del recibo firmado; no sustituye sus firmas.',
+            SimpleNamespace(codigo=s.codigo),
+            [('SALDO DESPUÉS DEL DESEMBOLSO', [('Mes del fondo', financiero['mes']), ('Importe entregado', 'Bs. '+datos['monto']),
+                ('Saldo disponible después de la operación', f'Bs. {financiero["saldo_despues"]:.2f}'), ('Referencia del recibo', str(r.referencia)),
+                ('Fecha de confirmación', timezone.localtime().strftime('%d/%m/%Y %H:%M'))])], [], unidad='TESORERÍA')
+        r.constancia_saldo.save(f'saldo-confirmado-{r.referencia}.pdf', ContentFile(constancia), save=False)
     r.firmado = firmado
     if comprobante:
         r.comprobante = comprobante
     r.confirmado_en = timezone.now()
-    r.save(update_fields=['firmado', 'comprobante', 'confirmado_en'])
+    r.save(update_fields=['firmado', 'comprobante', 'confirmado_en', 'constancia_saldo'])
     s.monto_desembolsado = Decimal(datos['monto'])
     s.responsable_adquisicion = datos['recibe']
     s.tipo_desembolso = datos['metodo']

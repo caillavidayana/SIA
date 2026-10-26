@@ -98,7 +98,7 @@
           <p>La contraseña debe contener:</p>
 
           <ul>
-            <li>Mínimo 8 caracteres</li>
+            <li>Mínimo {{ minimo ?? "…" }} caracteres</li><li v-if="errorPolitica">{{errorPolitica}}</li>
             <li>Una letra mayúscula</li>
             <li>Una letra minúscula</li>
             <li>Un número</li>
@@ -138,6 +138,8 @@
 </template>
 
 <script setup>
+import {usarPoliticaPassword} from '../utils/politicaPassword'
+const {minimo,errorPolitica}=usarPoliticaPassword()
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import SolicitanteMenu from '../components/SolicitanteMenu.vue'

@@ -1,3 +1,4 @@
+from config.testing import cerrar_respuesta
 from io import StringIO
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -32,7 +33,7 @@ class ActasAlmacenTests(APITestCase):
         acta = self.generar()
         r = self.client.get(acta['original_url'])
         contenido = b''.join(r.streaming_content)
-        r.close()
+        cerrar_respuesta(r)
         for texto in (b'Sillas para laboratorio', b'Ana Lopez', b'Carlos Perez', b'600.00', b'Bienes completos'):
             self.assertIn(texto, contenido)
         self.assertEqual(r['Cache-Control'], 'private, no-store')
@@ -48,7 +49,7 @@ class ActasAlmacenTests(APITestCase):
         self.assertTrue(historial[0]['firmado_url'])
         r = self.client.get(historial[0]['firmado_url'])
         self.assertEqual(b''.join(r.streaming_content), b'%PDF-1.4\nCopia con firmas')
-        r.close()
+        cerrar_respuesta(r)
 
     def test_director_visualiza_actas_sin_generarlas(self):
         acta = self.generar()
@@ -65,7 +66,7 @@ class ActasAlmacenTests(APITestCase):
             try:
                 self.assertTrue(b''.join(pdf.streaming_content).startswith(b'%PDF'))
             finally:
-                pdf.close()
+                cerrar_respuesta(pdf)
         r = self.client.post(self.url + '/actas-almacen/', {'recibe': 'Ana Lopez'}, format='json')
         self.assertEqual(r.status_code, 403, r.data)
         self.assertEqual(ActaEntregaAlmacen.objects.count(), 1)
@@ -93,7 +94,7 @@ class ActasAlmacenTests(APITestCase):
         self.assertEqual(self.client.get(self.url + '/actas-almacen/').status_code, 200)
         pdf = self.client.get(acta['original_url'])
         self.assertEqual(pdf.status_code, 200)
-        pdf.close()
+        cerrar_respuesta(pdf)
         self.assertEqual(self.client.post(self.url + '/actas-almacen/', {'entrega_confirmada': True}, format='json').status_code, 404)
         self.client.force_authenticate(self.usuarios['ESPECIALISTA'])
         self.assertEqual(self.client.get(acta['original_url']).status_code, 404)
@@ -111,7 +112,7 @@ class ActasAlmacenTests(APITestCase):
         pdf = self.client.get(self.url + '/actas-almacen/').data[0]['firmado_url']
         respuesta = self.client.get(pdf)
         self.assertEqual(respuesta.status_code, 200)
-        respuesta.close()
+        cerrar_respuesta(respuesta)
 
     def test_tecnico_soporte_visualiza_acta_de_su_componente(self):
         from soporte.models import Ticket, EstadoTicket, CategoriaTicket
@@ -129,7 +130,7 @@ class ActasAlmacenTests(APITestCase):
         self.assertEqual(acta.status_code, 200, acta.data)
         pdf = self.client.get(acta.data[0]['original_url'])
         self.assertEqual(pdf.status_code, 200)
-        pdf.close()
+        cerrar_respuesta(pdf)
         self.client.force_authenticate(self.usuarios['AUXILIAR_SERVICIOS_GENERALES'])
         self.assertEqual(self.client.get(self.url + '/actas-almacen/').status_code, 404)
 
