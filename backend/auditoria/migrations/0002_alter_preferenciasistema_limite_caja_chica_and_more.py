@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='preferenciasistema',
             name='limite_caja_chica',
-            field=models.DecimalField(decimal_places=2, default=1000.0, max_digits=12),
+            field=models.DecimalField(decimal_places=2, default=1500.0, max_digits=12),#caja chica se puede modificar
         ),
         migrations.AlterField(
             model_name='preferenciasistema',

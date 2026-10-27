@@ -148,7 +148,7 @@ class PreferenciaSistema(models.Model):
     limite_caja_chica = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=1000.00 #se puede modifcar
+        default=1500.00 #se puede modifcar caja chica
     )
 
     intentos_login = models.PositiveIntegerField(

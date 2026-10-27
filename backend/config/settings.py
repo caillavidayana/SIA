@@ -53,7 +53,7 @@ load_dotenv(os.environ.get('SIA_ENV_FILE', BASE_DIR.parent / '.env'), override=F
 # CAMBIAR EN .env: SIA_LIMITE_CAJA_CHICA=1500 (valor vigente inicial: 1000).
 # Efecto: permite 1200 si tambien cumple las cotizaciones de R02 y el saldo.
 # Reiniciar Django. No cambiar solo el '1000' de abajo si .env ya lo define.
-SIA_LIMITE_CAJA_CHICA = Decimal(os.environ.get('SIA_LIMITE_CAJA_CHICA', '1000'))
+SIA_LIMITE_CAJA_CHICA = Decimal(os.environ.get('SIA_LIMITE_CAJA_CHICA', '1500'))
 # REQUERIMIENTO 2 (R02): cotizaciones adicionales, independiente de R01.
 # 2. COTIZACIONES (R02)
 # CAMBIAR EN .env: SIA_UMBRAL_COTIZACIONES=800 (inicial: 500).
@@ -72,8 +72,8 @@ SIA_PROVEEDORES_DISTINTOS = os.environ.get('SIA_PROVEEDORES_DISTINTOS', 'True').
 # red, cambiar SIA_PALABRAS_PRIORIDAD a ('hardware',) o a () para solo categoria.
 # Reiniciar Django y actualizar navegador. No editar el comparador en Vue.
 # Se aplica a solicitudes nuevas o editadas; no reclasifica todo el historial.
-SIA_CATEGORIAS_PRIORIDAD = ('RED', 'REDES', 'SERVIDOR', 'SERVIDORES')
-SIA_PALABRAS_PRIORIDAD = ('red', 'conectividad de internet')
+SIA_CATEGORIAS_PRIORIDAD = ('HARDWARE', 'HARDWARE', 'SERVIDOR', 'SERVIDORES')
+SIA_PALABRAS_PRIORIDAD = ('hardware', 'computadoras')
 SIA_PRIORIDAD_AUTOMATICA = 'ALTA'
 
 # R04 - SLA al crear: Alta 4 h, Media 24 h, Baja 72 h.
@@ -124,7 +124,7 @@ SIA_GRUPO_APROBADOR = os.environ.get('SIA_GRUPO_APROBADOR', 'Jefe administrativo
 # CAMBIAR EN .env: SIA_FONDO_MENSUAL=7000 (inicial: 5000).
 # compras/caja_chica.py -> resumen/registrar_operacion. Tesoreria lee la API.
 # No cambiar saldos a mano: se calculan desde compromisos y desembolsos.
-SIA_FONDO_MENSUAL = Decimal(os.environ.get('SIA_FONDO_MENSUAL', '5000'))
+SIA_FONDO_MENSUAL = Decimal(os.environ.get('SIA_FONDO_MENSUAL', '5500'))
 if (not SIA_LIMITE_CAJA_CHICA.is_finite() or SIA_LIMITE_CAJA_CHICA <= 0
         or not SIA_UMBRAL_COTIZACIONES.is_finite() or SIA_UMBRAL_COTIZACIONES < 0
         or SIA_COTIZACIONES_MINIMAS < 1 or any(h <= 0 for h in SIA_SLA_HORAS.values())
