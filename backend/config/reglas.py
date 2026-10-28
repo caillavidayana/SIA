@@ -50,7 +50,7 @@ def configuracion_reglas():
         'palabras_prioridad': list(settings.SIA_PALABRAS_PRIORIDAD),
         'prioridad_automatica': settings.SIA_PRIORIDAD_AUTOMATICA,
         'sla_horas': settings.SIA_SLA_HORAS,
-        'dias_reapertura': settings.SIA_DIAS_REAPERTURA,
+        'horas_reapertura': settings.SIA_HORAS_REAPERTURA,
         'max_tickets_tecnico': settings.SIA_MAX_TICKETS_TECNICO,
         'umbral_aprobacion_administrativa': str(settings.SIA_UMBRAL_APROBACION_ADMINISTRATIVA),
         'fondo_mensual': str(settings.SIA_FONDO_MENSUAL),

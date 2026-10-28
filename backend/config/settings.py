@@ -37,7 +37,7 @@ load_dotenv(os.environ.get('SIA_ENV_FILE', BASE_DIR.parent / '.env'), override=F
 # 3. PRIORIDAD AUTOMATICA (R03): categorias/palabras, debajo en este archivo.
 # 4. TIEMPOS DE ATENCION (R04): SIA_SLA_*_HORAS en .env.
 # 5. FLUJO DE ESTADOS (R05): config/flujo_tickets.py.
-# 6. REAPERTURA (R06): SIA_DIAS_REAPERTURA en .env.
+# 6. REAPERTURA (R06): SIA_HORAS_REAPERTURA en .env.
 # 7. CARGA DEL TECNICO (R07): SIA_MAX_TICKETS_TECNICO en .env.
 # 8. APROBACION DE COMPRA (R08): SIA_REQUIERE_APROBACION_DIRECTOR en .env.
 # 9. FONDO Y SALDO (R09): SIA_FONDO_MENSUAL en .env.
@@ -53,7 +53,7 @@ load_dotenv(os.environ.get('SIA_ENV_FILE', BASE_DIR.parent / '.env'), override=F
 # CAMBIAR EN .env: SIA_LIMITE_CAJA_CHICA=1500 (valor vigente inicial: 1000).
 # Efecto: permite 1200 si tambien cumple las cotizaciones de R02 y el saldo.
 # Reiniciar Django. No cambiar solo el '1000' de abajo si .env ya lo define.
-SIA_LIMITE_CAJA_CHICA = Decimal(os.environ.get('SIA_LIMITE_CAJA_CHICA', '1500'))
+SIA_LIMITE_CAJA_CHICA = Decimal(os.environ.get('SIA_LIMITE_CAJA_CHICA', '100'))
 # REQUERIMIENTO 2 (R02): cotizaciones adicionales, independiente de R01.
 # 2. COTIZACIONES (R02)
 # CAMBIAR EN .env: SIA_UMBRAL_COTIZACIONES=800 (inicial: 500).
@@ -94,14 +94,17 @@ SIA_SLA_HORAS = {
 # No hay un numero de .env para esta regla; conservar acciones y permisos.
 
 # 6. REAPERTURA (R06)
-# CAMBIAR EN .env: SIA_DIAS_REAPERTURA=10 (inicial: 7).
+# CAMBIAR EN .env: SIA_HORAS_REAPERTURA=7 para permitir 7 horas.
 # soporte/reapertura.py -> puede_reabrir/fecha_maxima. Conserva cerrado_en.
-SIA_DIAS_REAPERTURA = int(os.environ.get('SIA_DIAS_REAPERTURA', '7'))
+if 'SIA_HORAS_REAPERTURA' in os.environ:
+    SIA_HORAS_REAPERTURA = int(os.environ['SIA_HORAS_REAPERTURA'])
+else:
+    SIA_HORAS_REAPERTURA = int(os.environ.get('SIA_DIAS_REAPERTURA', '7')) * 24
 # R07 - Máximo de tickets activos; cambiar a 8 aquí mediante .env.
 # 7. CARGA DEL TECNICO (R07)
 # CAMBIAR EN .env: SIA_MAX_TICKETS_TECNICO=8 (inicial: 5).
 # soporte/carga_tecnica.py -> bloquear_y_validar; incluye apoyos/mantenimiento.
-SIA_MAX_TICKETS_TECNICO = int(os.environ.get('SIA_MAX_TICKETS_TECNICO', '5'))
+SIA_MAX_TICKETS_TECNICO = int(os.environ.get('SIA_MAX_TICKETS_TECNICO', '1'))
 # REQUERIMIENTO 8 (R08): DAF certifica y deriva a Tesorería sin Director.
 # True permite recuperar el paso anterior mediante configuración y reinicio.
 # 8. APROBACION DE COMPRA (R08)
@@ -128,7 +131,7 @@ SIA_FONDO_MENSUAL = Decimal(os.environ.get('SIA_FONDO_MENSUAL', '5500'))
 if (not SIA_LIMITE_CAJA_CHICA.is_finite() or SIA_LIMITE_CAJA_CHICA <= 0
         or not SIA_UMBRAL_COTIZACIONES.is_finite() or SIA_UMBRAL_COTIZACIONES < 0
         or SIA_COTIZACIONES_MINIMAS < 1 or any(h <= 0 for h in SIA_SLA_HORAS.values())
-        or SIA_DIAS_REAPERTURA < 0 or SIA_MAX_TICKETS_TECNICO < 1
+        or SIA_HORAS_REAPERTURA < 0 or SIA_MAX_TICKETS_TECNICO < 1
         or not SIA_FONDO_MENSUAL.is_finite() or SIA_FONDO_MENSUAL <= 0
         or not SIA_UMBRAL_APROBACION_ADMINISTRATIVA.is_finite() or SIA_UMBRAL_APROBACION_ADMINISTRATIVA < 0):
     from django.core.exceptions import ImproperlyConfigured

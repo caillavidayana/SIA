@@ -2886,7 +2886,7 @@ class TicketViewSet(
 
     # ======================================================
     # REGLA R06 - REAPERTURA DE TICKETS
-    # Permitir reapertura dentro de los primeros 7 dias
+    # Permitir reapertura dentro del plazo configurado en horas.
     # ======================================================
     @action(detail=True, methods=['post'], url_path='reabrir-ticket')
     def reabrir_ticket(self, request, pk=None):
@@ -2900,7 +2900,8 @@ class TicketViewSet(
             if ticket.solicitante_id != request.user.pk:
                 return Response({'detalle': 'Solo el solicitante propietario puede reabrir su ticket.'}, status=403)
             if not puede_reabrir(ticket, request.user):
-                return Response({'detalle': f'Solo puede reabrir un ticket Cerrado dentro de {settings.SIA_DIAS_REAPERTURA} días desde el cierre.'}, status=400)
+                unidad = 'hora' if settings.SIA_HORAS_REAPERTURA == 1 else 'horas'
+                return Response({'detalle': f'Solo puede reabrir un ticket Cerrado dentro de {settings.SIA_HORAS_REAPERTURA} {unidad} desde el cierre.'}, status=400)
             tecnicos = list(ticket.especialistas_apoyo.values_list('pk', flat=True))
             if ticket.tecnico_asignado_id:
                 tecnicos.append(ticket.tecnico_asignado_id)

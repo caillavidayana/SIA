@@ -9,8 +9,8 @@ Esta revisión corresponde a la última aclaración del usuario. Sustituye las i
 | R03 | Categoría Red del solicitante produce prioridad Alta automática. UTIC la recibe marcada y no puede seleccionar otra mientras aplique la regla. El solicitante no selecciona prioridad. | `config/settings.py`: `SIA_CATEGORIAS_PRIORIDAD`, `SIA_PALABRAS_PRIORIDAD`, `SIA_PRIORIDAD_AUTOMATICA`; `config/reglas.py`, modelos y clasificación UTIC. |
 | R04 | Conserva plazos de Alta, Media y Baja y el cómputo del vencimiento. La clasificación UTIC presenta esas tres opciones. | `SIA_SLA_ALTA_HORAS=4`, `SIA_SLA_MEDIA_HORAS=24`, `SIA_SLA_BAJA_HORAS=72`. Sin cambios en la lógica del reloj durante esta revisión. |
 | R05 | Conserva las acciones y el flujo de estados existentes. | Sin cambios funcionales en esta revisión. |
-| R06 | Solo el solicitante propietario puede reabrir un ticket cerrado dentro de siete días. Vuelve al proceso y conserva fecha de cierre e historial. | `SIA_DIAS_REAPERTURA=7`; `soporte/reapertura.py` y acción `reabrir-ticket`. Verificado sin cambiar su lógica. |
-| R07 | Conserva el control de carga técnica y las asignaciones existentes. | `SIA_MAX_TICKETS_TECNICO=5`; `soporte/carga_tecnica.py`. Sin cambios funcionales en esta revisión. |
+| R06 | Solo el solicitante propietario puede reabrir un ticket cerrado dentro de siete horas. Vuelve al proceso y conserva fecha de cierre e historial. | `SIA_HORAS_REAPERTURA=7`; `soporte/reapertura.py` y acción `reabrir-ticket`. |
+| R07 | Limita a un ticket activo por técnico, contando asignaciones principales, apoyos y mantenimiento. | `SIA_MAX_TICKETS_TECNICO=1`; `soporte/carga_tecnica.py`. |
 | R08 | Conserva Jefatura → DAF y la certificación. DAF deriva directamente a Tesorería; el Director no vuelve a aprobar una compra, incluso si supera 300. No permite autoaprobación ni actuar sin permisos. | `SIA_REQUIERE_APROBACION_DIRECTOR=False`; `compras/views.py`, `compras/aprobacion.py`. |
 | R09 | Tesorería ve fondo, comprometido, desembolsado y saldo en su dashboard. Sin saldo no puede generar recibo ni confirmar un pago; la certificación también impide comprometer fondos inexistentes. | `SIA_FONDO_MENSUAL=5000`; `compras/caja_chica.py`, `compras/tesoreria.py`, `CajaChicaPanel.vue`. No cambia el modelo del fondo en esta revisión. |
 | R10 | Mantiene validadores y hashes de contraseña existentes. | Sin cambios funcionales en esta revisión. |
@@ -24,7 +24,7 @@ Los archivos backend de la tabla son relativos a `backend/`; los componentes y u
 3. **R02:** corregir a 700 y adjuntar una cotización con proveedor. Enviar debe solicitar dos adicionales. Aceptar conserva el formulario. Agregar archivos de otros dos proveedores, completar sus nombres y enviar de nuevo; ahora continúa. Empresa sigue siendo opcional. 500 exactos admite una cotización; 500.01 exige tres, siempre dentro de R01.
 4. **R03:** como solicitante, crear con categoría Red. No hay selector de prioridad. Como Jefatura UTIC, validar los requisitos y comprobar Alta marcada y bloqueada; conservar criterio técnico y asignación del flujo anterior.
 5. **R04/R07:** comprobar plazo y carga en el flujo normal. No se añadió otro paso de asignación ni se reinicia el reloj al clasificar.
-6. **R06:** cerrar un ticket y entrar como su solicitante; reabrir dentro del plazo. Verificar nuevo ciclo y cierre anterior conservado. El caso de más de siete días se prueba en la base temporal automatizada sin alterar fechas reales.
+6. **R06:** cerrar un ticket y entrar como su solicitante; reabrir dentro de siete horas. Verificar nuevo ciclo y cierre anterior conservado. El caso de más de siete horas se prueba en la base temporal automatizada sin alterar fechas reales.
 7. **R08:** elevar una compra viable desde Jefatura, evaluar y certificar con DAF. Debe quedar `APROBADO_PARA_DESEMBOLSO`, visible para Tesorería. No hay aprobación pendiente del Director. Los expedientes antiguos ya certificados pueden continuarse desde el detalle de DAF con **Derivar a Tesorería**, conservando su certificación.
 8. **R09:** abrir Tesorería → Control de Caja Chica. Si una operación excede el saldo disponible, debe rechazarse sin desembolso. Para demostrar el bloqueo sin consumir fondos reales, ejecutar las pruebas aisladas del backend.
 
@@ -38,14 +38,14 @@ SIA_LIMITE_CAJA_CHICA=1500
 # R02: cambiar a 800 permite 700 con una cotización.
 SIA_UMBRAL_COTIZACIONES=800
 # R06: cambia la ventana de reapertura.
-SIA_DIAS_REAPERTURA=10
+SIA_HORAS_REAPERTURA=10
 # R07: conserva el mismo control con otro máximo.
 SIA_MAX_TICKETS_TECNICO=8
 # R09: mismo cálculo y controles, con otro fondo.
 SIA_FONDO_MENSUAL=7000
 ```
 
-Restaurar respectivamente 1000, 500, 7, 5 y 5000 al terminar. El entorno definido en la terminal tiene prioridad sobre `.env`. La configuración efectiva se consulta en el endpoint autenticado `/api/auditoria/limite-caja-chica/`.
+Restaurar respectivamente 1000, 500, 7 horas, 5 y 5000 al terminar. El entorno definido en la terminal tiene prioridad sobre `.env`. La configuración efectiva se consulta en el endpoint autenticado `/api/auditoria/limite-caja-chica/`.
 
 Para volver expresamente al paso anterior del Director puede usarse `SIA_REQUIERE_APROBACION_DIRECTOR=True` y reiniciar. Con False, el umbral/grupo administrativo del antiguo paso del Director no añaden otra aprobación. Esta opción de compatibilidad no está activada en el flujo entregado.
 

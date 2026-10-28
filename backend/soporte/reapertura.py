@@ -1,9 +1,9 @@
 # 6. REAPERTURA (R06)
-# Cambiar .env: SIA_DIAS_REAPERTURA=10 para pasar de 7 a 10 dias.
+# Cambiar .env: SIA_HORAS_REAPERTURA=7 para permitir 7 horas.
 # fecha_maxima/puede_reabrir controlan propietario, estado y plazo.
 # No borrar cerrado_en: archivar_ciclo conserva el cierre y documentos previos.
 
-"""R06 - Reapertura del propietario dentro de SIA_DIAS_REAPERTURA (.env)."""
+"""R06 - Reapertura del propietario dentro de SIA_HORAS_REAPERTURA (.env)."""
 from datetime import timedelta
 from django.conf import settings
 from django.db import models
@@ -11,7 +11,7 @@ from django.utils import timezone
 
 
 def fecha_maxima(ticket):
-    return ticket.cerrado_en+timedelta(days=settings.SIA_DIAS_REAPERTURA) if ticket.cerrado_en else None
+    return ticket.cerrado_en+timedelta(hours=settings.SIA_HORAS_REAPERTURA) if ticket.cerrado_en else None
 
 
 def puede_reabrir(ticket, usuario):

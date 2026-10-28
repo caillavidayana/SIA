@@ -26,6 +26,8 @@
 | — | Técnico de Almacén y Compras | `almacen@emi.edu.bo` | `Hola123*` | `/almacen/dashboard` |
 | — | Técnico de Tesorería | `tesoreria@emi.edu.bo` | `Hola123*` | `/tesoreria/dashboard` |
 | Jefe UTIC | Técnico de Soporte Técnico | `especialista@emi.edu.bo` | `Hola123*` | `/especialista/dashboard` |
+| Jefe UTIC | Técnico de Soporte Técnico | `especialista2p@emi.edu.bo'
+
 | Jefe Mantenimiento | Técnico de Mantenimiento | `auxiliar.sg@emi.edu.bo` | `Hola123*` | `/auxiliar-servicios-generales/dashboard` |
 
 ### Usuario

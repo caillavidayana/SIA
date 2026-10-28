@@ -14,10 +14,10 @@ class ReaperturaR06Tests(APITestCase):
         cls.otro=Usuario.objects.create_user(username='otro-reabrir',email='otro-reabrir@example.test',must_change_password=False)
         cls.area=Area.objects.create(codigo='R06',nombre='Área reapertura')
 
-    def crear(self,dias=3):
+    def crear(self,horas=3):
         return Ticket.objects.create(codigo='R06',titulo='Falla recurrente',descripcion='Vuelve a fallar',solucion='Solución del ciclo anterior',
             area=self.area,solicitante=self.usuario,estado=EstadoTicket.objects.get(codigo='CERRADO'),
-            categoria=CategoriaTicket.objects.get(codigo='HARDWARE'),cerrado_en=timezone.now()-timedelta(days=dias))
+            categoria=CategoriaTicket.objects.get(codigo='HARDWARE'),cerrado_en=timezone.now()-timedelta(hours=horas))
 
     def reabrir(self,ticket,usuario=None):
         self.client.force_authenticate(usuario or self.usuario)
@@ -31,7 +31,7 @@ class ReaperturaR06Tests(APITestCase):
         self.assertEqual(t.historial_reaperturas[0]['textos']['solucion'],'Solución del ciclo anterior')
         self.assertEqual(t.solucion,'');self.assertTrue(t.reabierto_en)
 
-    def test_ocho_dias_no_permite(self):
+    def test_ocho_horas_no_permite(self):
         t=self.crear(8);self.assertEqual(self.reabrir(t).status_code,400)
         t.refresh_from_db();self.assertEqual(t.estado.codigo,'CERRADO')
 
@@ -44,6 +44,11 @@ class ReaperturaR06Tests(APITestCase):
         t.estado=EstadoTicket.objects.get(codigo='EN_EJECUCION');t.save()
         self.assertEqual(self.reabrir(t).status_code,400)
 
-    @override_settings(SIA_DIAS_REAPERTURA=2)
+    @override_settings(SIA_HORAS_REAPERTURA=2)
     def test_plazo_configurable(self):
         self.assertEqual(self.reabrir(self.crear(3)).status_code,400)
+
+    def test_fecha_maxima_es_siete_horas_despues_del_cierre(self):
+        from .reapertura import fecha_maxima
+        ticket = self.crear()
+        self.assertEqual(fecha_maxima(ticket), ticket.cerrado_en + timedelta(hours=7))

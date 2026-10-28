@@ -78,15 +78,15 @@ Los nombres de archivos backend indicados abajo son relativos a `backend/`; los 
 
 ## R06 — Reapertura por el solicitante
 
-1. **Función:** Solo el propietario puede reabrir un ticket cerrado dentro de siete días. Conserva el cierre anterior y archiva solución y referencias documentales del ciclo anterior.
+1. **Función:** Solo el propietario puede reabrir un ticket cerrado dentro de siete horas. Conserva el cierre anterior y archiva solución y referencias documentales del ciclo anterior.
 2. **Archivos reales:** soporte/reapertura.py; soporte/views.py; soporte/models.py; soporte/serializers.py; usuarios/archivos.py; frontend/src/views/MisSolicitudesView.vue.
 3. **Implementación:** fecha_maxima; puede_reabrir; archivar_ciclo; reabrir_ticket.
-4. **Configuración:** `SIA_DIAS_REAPERTURA`.
-5. **Valor inicial:** 7.
-6. **Ejemplo de modificación:** `SIA_DIAS_REAPERTURA=10`.
+4. **Configuración:** `SIA_HORAS_REAPERTURA`.
+5. **Valor configurado:** 7 horas.
+6. **Ejemplo de modificación:** `SIA_HORAS_REAPERTURA=10`.
 7. **Aplicación del cambio:** reiniciar Django y actualizar la pantalla; sin migración ni recompilación para modificar estos valores. La instalación inicial sí aplica las migraciones documentadas.
-8. **Prueba:** Como propietario reabrir un cierre reciente; comprobar estado En ejecución, nuevo plazo y cierre anterior conservado. Otro usuario y un cierre de ocho días se rechazan con valor 7; las pruebas aisladas cubren esos tiempos.
-9. **Reversión:** Restaurar 7 y reiniciar. Mantener historial_reaperturas y archivos archivados.
+8. **Prueba:** Como propietario reabrir un cierre reciente; comprobar estado En ejecución, nuevo plazo y cierre anterior conservado. Otro usuario y un cierre de ocho horas se rechazan con valor 7; las pruebas aisladas cubren esos tiempos.
+9. **Reversión:** Restaurar el valor anterior en horas y reiniciar. Mantener historial_reaperturas y archivos archivados.
 10. **Rama reservada:** `regla-06-reapertura`. Borrador de revisión: `docs/pull-requests/R06.md`.
 
 ## R07 — Carga máxima por técnico

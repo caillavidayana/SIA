@@ -9,7 +9,7 @@ En VS Code pulsa **Ctrl + Shift + F** y busca, por ejemplo, `1. CAJA CHICA` o `3
 | `3. PRIORIDAD AUTOMATICA` | `backend/config/settings.py` | `SIA_CATEGORIAS_PRIORIDAD`, `SIA_PALABRAS_PRIORIDAD` y `SIA_PRIORIDAD_AUTOMATICA`. |
 | `4. TIEMPOS DE ATENCION` | `.env` | `SIA_SLA_ALTA_HORAS`, `SIA_SLA_MEDIA_HORAS` y `SIA_SLA_BAJA_HORAS`. |
 | `5. FLUJO DE ESTADOS` | `backend/config/flujo_tickets.py` | `ESTADOS_FUNCIONALES` y `TRANSICIONES_PERMITIDAS`. Es un mapa de estados, no un importe numérico. |
-| `6. REAPERTURA` | `.env` | `SIA_DIAS_REAPERTURA=10` para pasar de siete a diez días. |
+| `6. REAPERTURA` | `.env` | `SIA_HORAS_REAPERTURA=10` para pasar de siete a diez horas. |
 | `7. CARGA DEL TECNICO` | `.env` | `SIA_MAX_TICKETS_TECNICO=8` para pasar de cinco a ocho trabajos activos. |
 | `8. APROBACION DE COMPRA` | `.env` | `SIA_REQUIERE_APROBACION_DIRECTOR=False` conserva el flujo sin Director; True reactiva el paso anterior. |
 | `9. FONDO Y SALDO` | `.env` | `SIA_FONDO_MENSUAL=7000` para pasar de 5000 a 7000. |
